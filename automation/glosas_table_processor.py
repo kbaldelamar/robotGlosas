@@ -57,6 +57,7 @@ class GlosasTableProcessor:
     async def configure_table_show_all(self) -> bool:
         """
         Configura la tabla para mostrar todos los registros.
+        VERSIÓN MEJORADA CON DEPURACIÓN
         
         Returns:
             bool: True si se configuró correctamente
@@ -67,46 +68,107 @@ class GlosasTableProcessor:
                 action="Configurando tabla para mostrar todos los registros"
             )
             
-            self._log_state("Configurando tabla para mostrar todos los registros")
+            self._log_state("🔧 DEPURACIÓN: Configurando tabla para mostrar todos los registros")
             
-            # Buscar el select de cantidad de entradas
+            # 1️⃣ Buscar el select de cantidad de entradas
             length_select = self.page.locator(self.selectors['tabla_length_select'])
             
             if await length_select.count() == 0:
-                self._log_state("No se encontró el select de cantidad de entradas", "error")
+                self._log_state("❌ No se encontró el select de cantidad de entradas", "error")
                 return False
             
-            self._log_state("Select de cantidad encontrado")
+            self._log_state("✅ Select de cantidad encontrado")
             
-            # Hacer clic en el select para abrirlo
+            # 2️⃣ Tomar screenshot antes del clic
+            await self.page.screenshot(path="debug_before_select_click.png")
+            
+            # 3️⃣ Hacer clic en el select para abrirlo
             await length_select.click()
-            await asyncio.sleep(0.5)
+            self._log_state("🔧 Select clickeado, esperando...")
+            await asyncio.sleep(1)  # Aumentar pausa
             
-            # Buscar y seleccionar la opción "Todos"
-            option_todos = self.page.locator(self.selectors['option_todos'])
+            # 4️⃣ Tomar screenshot después del clic para ver las opciones
+            await self.page.screenshot(path="debug_after_select_click.png")
             
-            if await option_todos.count() == 0:
-                self._log_state("No se encontró la opción 'Todos'", "error")
+            # 5️⃣ DEPURACIÓN: Listar todas las opciones disponibles
+            all_options = self.page.locator("option")
+            total_options = await all_options.count()
+            self._log_state(f"🔍 DEPURACIÓN: Total de opciones encontradas: {total_options}")
+            
+            for i in range(total_options):
+                try:
+                    option = all_options.nth(i)
+                    value = await option.get_attribute("value")
+                    text = await option.text_content()
+                    self._log_state(f"🔍 Opción {i}: value='{value}', text='{text}'")
+                except Exception as e:
+                    self._log_state(f"🔍 Error leyendo opción {i}: {e}")
+            
+            # 6️⃣ Buscar la opción "Todos" con múltiples selectores
+            selectores_todos = [
+                "option[value='-1']",                           # Selector original
+                "option[value='-1'][contains(.,'Todos')]",      # Selector del usuario
+                "option:has-text('Todos')",                     # Por texto
+                "option:has-text('todos')",                     # Minúsculas
+                "option:has-text('All')",                       # En inglés
+                "option[value='all']",                          # Otro valor posible
+                "option[value='0']",                            # Otro valor posible
+                "option[value='-1']:visible",                   # Solo visibles
+            ]
+            
+            option_todos = None
+            selector_usado = None
+            
+            for selector in selectores_todos:
+                try:
+                    temp_option = self.page.locator(selector)
+                    if await temp_option.count() > 0:
+                        option_todos = temp_option
+                        selector_usado = selector
+                        self._log_state(f"✅ Opción 'Todos' encontrada con selector: {selector}")
+                        break
+                except Exception as e:
+                    self._log_state(f"🔍 Error con selector '{selector}': {e}")
+            
+            if option_todos is None:
+                self._log_state("❌ No se encontró la opción 'Todos' con ningún selector", "error")
+                # Tomar screenshot del problema
+                await self.page.screenshot(path="debug_no_todos_option.png")
                 return False
             
-            self._log_state("Opción 'Todos' encontrada")
+            # 7️⃣ Verificar que la opción sea visible y clickeable
+            is_visible = await option_todos.is_visible()
+            is_enabled = await option_todos.is_enabled()
+            self._log_state(f"🔍 Opción 'Todos' - Visible: {is_visible}, Habilitada: {is_enabled}")
             
-            # Hacer clic en "Todos"
+            if not is_visible:
+                self._log_state("⚠️ Opción 'Todos' no es visible, intentando scroll", "warning")
+                await option_todos.scroll_into_view_if_needed()
+                await asyncio.sleep(0.5)
+            
+            # 8️⃣ Hacer clic en "Todos"
+            self._log_state(f"🔧 Haciendo clic en opción 'Todos' usando selector: {selector_usado}")
             await option_todos.click()
-            self._log_state("Opción 'Todos' seleccionada")
+            self._log_state("✅ Clic realizado en opción 'Todos'")
             
-            # Esperar a que la tabla se recargue
+            # 9️⃣ Esperar a que la tabla se recargue
+            self._log_state("🔧 Esperando recarga de tabla...")
             await self.page.wait_for_load_state('networkidle', timeout=15000)
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)  # Aumentar pausa
             
-            # Verificar que se aplicó el cambio
+            # 🔟 Tomar screenshot final
+            await self.page.screenshot(path="debug_after_todos_click.png")
+            
+            # 1️⃣1️⃣ Verificar que se aplicó el cambio
             total_info = await self._get_table_total_info()
-            self._log_state(f"Tabla configurada - {total_info}")
+            self._log_state(f"📊 Tabla configurada - {total_info}")
             
             return True
             
         except Exception as e:
-            self._log_state(f"Error configurando tabla: {e}", "error")
+            self._log_state(f"❌ Error configurando tabla: {e}", "error")
+            # Tomar screenshot del error
+            await self.page.screenshot(path="debug_configure_table_error.png")
             return False
     
     async def _get_table_total_info(self) -> str:

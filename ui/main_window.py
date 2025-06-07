@@ -4,9 +4,12 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                             QSplitter, QGroupBox, QMessageBox)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from ui.glosas_widget import GlosasWidget
+from ui.glosas_widget import GlosasWidget  # *** MANTENER NOMBRE ORIGINAL ***
 from ui.components.client_table import ClientTable
 from database.db_manager import DatabaseManager
+
+# *** NUEVO: Importar gestor de base de datos de glosas ***
+from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models import Cliente
 from config.settings import Settings
 
@@ -14,12 +17,23 @@ class MainWindow(QMainWindow):
     """
     Ventana principal de la aplicación.
     Coordina todos los componentes y proporciona la interfaz principal.
+    *** ACTUALIZADO: Ahora incluye soporte para base de datos de glosas ***
     """
     
     def __init__(self):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.db_manager = DatabaseManager()
+        
+        # *** NUEVO: Inicializar base de datos de glosas ***
+        try:
+            self.db_manager_glosas = DatabaseManagerGlosas()
+            self.db_manager_glosas.create_glosas_tables()
+            self.logger.info("Base de datos de glosas inicializada correctamente")
+        except Exception as e:
+            self.logger.error(f"Error inicializando base de datos de glosas: {e}")
+            self.db_manager_glosas = None
+        
         self.setup_ui()
         self.setup_menu()
         self.setup_status_bar()
@@ -47,8 +61,8 @@ class MainWindow(QMainWindow):
         # Stack widget para diferentes vistas
         self.stacked_widget = QStackedWidget()
         
-        # Crear y agregar widgets
-        self.glosas_widget = GlosasWidget()
+        # Crear y agregar widgets (MANTENER NOMBRES ORIGINALES)
+        self.glosas_widget = GlosasWidget()  # *** NOMBRE ORIGINAL ***
         self.stacked_widget.addWidget(self.glosas_widget)
         
         # Widget de placeholder para reportes (futuro)
@@ -168,6 +182,13 @@ class MainWindow(QMainWindow):
         refresh_action.triggered.connect(self.refresh_clients)
         db_submenu.addAction(refresh_action)
         
+        # *** NUEVO: Refrescar datos de glosas ***
+        refresh_glosas_action = QAction('Refrescar Datos de Glosas', self)
+        refresh_glosas_action.setShortcut(QKeySequence('Ctrl+F5'))
+        refresh_glosas_action.setStatusTip('Actualizar datos de glosas')
+        refresh_glosas_action.triggered.connect(self.refresh_glosas_data)
+        db_submenu.addAction(refresh_glosas_action)
+        
         # Agregar cliente (funcionalidad futura)
         add_client_action = QAction('Agregar Cliente', self)
         add_client_action.setShortcut(QKeySequence('Ctrl+N'))
@@ -280,7 +301,9 @@ class MainWindow(QMainWindow):
         """Configura la barra de estado."""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("BootGestor - Módulo: Gestión de Glosas")
+        
+        # *** INDICAR QUE ES LA VERSIÓN MEJORADA ***
+        self.status_bar.showMessage("BootGestor v2.0 - Módulo: Gestión de Glosas (Mejorado)")
         
         # Timer para actualizar estado periódicamente
         self.status_timer = QTimer()
@@ -304,7 +327,7 @@ class MainWindow(QMainWindow):
         
         # Actualizar mensaje de estado según la vista
         view_names = {
-            0: "Gestión de Glosas",
+            0: "Gestión de Glosas (v2.0)",  # *** INDICAR VERSIÓN ***
             1: "Reportes",
             2: "Configuración"
         }
@@ -313,7 +336,7 @@ class MainWindow(QMainWindow):
         
         # Solo actualizar status bar si ya existe
         if hasattr(self, 'status_bar') and self.status_bar:
-            self.status_bar.showMessage(f"BootGestor - Módulo: {view_name}")
+            self.status_bar.showMessage(f"BootGestor v2.0 - Módulo: {view_name}")
         
         self.logger.info(f"Cambiado a módulo: {view_name}")
     
@@ -389,11 +412,11 @@ class MainWindow(QMainWindow):
             
             # Actualizar mensaje de estado
             current_view = self.stacked_widget.currentIndex()
-            view_names = {0: "Gestión de Glosas", 1: "Reportes"}
+            view_names = {0: "Gestión de Glosas (v2.0)", 1: "Reportes"}
             view_name = view_names.get(current_view, "Módulo Actual")
             
             self.status_bar.showMessage(
-                f"BootGestor - {view_name} | Clientes: {len(clients)}"
+                f"BootGestor v2.0 - {view_name} | Clientes: {len(clients)}"
             )
             
             self.logger.info(f"Lista de clientes actualizada: {len(clients)} registros")
@@ -406,6 +429,32 @@ class MainWindow(QMainWindow):
                 f"No se pudieron cargar los clientes: {str(e)}"
             )
     
+    def refresh_glosas_data(self):
+        """*** NUEVO: Actualiza los datos de glosas ***"""
+        try:
+            if hasattr(self.glosas_widget, 'refresh_data'):
+                self.glosas_widget.refresh_data()
+                QMessageBox.information(
+                    self,
+                    "Datos Actualizados",
+                    "Los datos de glosas se han actualizado correctamente."
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Función No Disponible",
+                    "La función de actualización de glosas aún no está disponible."
+                )
+            self.logger.info("Datos de glosas actualizados")
+            
+        except Exception as e:
+            self.logger.error(f"Error actualizando datos de glosas: {e}")
+            QMessageBox.critical(
+                self,
+                "Error de Base de Datos",
+                f"No se pudieron actualizar los datos de glosas: {str(e)}"
+            )
+    
     def on_client_selected(self, client: Cliente):
         """
         Maneja la selección de un cliente.
@@ -414,11 +463,11 @@ class MainWindow(QMainWindow):
             client (Cliente): Cliente seleccionado
         """
         current_view = self.stacked_widget.currentIndex()
-        view_names = {0: "Gestión de Glosas", 1: "Reportes"}
+        view_names = {0: "Gestión de Glosas (v2.0)", 1: "Reportes"}
         view_name = view_names.get(current_view, "Módulo Actual")
         
         self.status_bar.showMessage(
-            f"BootGestor - {view_name} | Cliente: {client.nombre}"
+            f"BootGestor v2.0 - {view_name} | Cliente: {client.nombre}"
         )
         
         self.logger.info(f"Cliente seleccionado: {client.nombre} (ID: {client.id})")
@@ -459,11 +508,11 @@ class MainWindow(QMainWindow):
         try:
             client_count = len(self.db_manager.get_all_clients())
             current_view = self.stacked_widget.currentIndex()
-            view_names = {0: "Gestión de Glosas", 1: "Reportes"}
+            view_names = {0: "Gestión de Glosas (v2.0)", 1: "Reportes"}
             view_name = view_names.get(current_view, "Módulo Actual")
             
             self.status_bar.showMessage(
-                f"BootGestor - {view_name} | Clientes: {client_count}"
+                f"BootGestor v2.0 - {view_name} | Clientes: {client_count}"
             )
         except Exception as e:
             self.logger.error(f"Error actualizando estado: {e}")
@@ -474,14 +523,22 @@ class MainWindow(QMainWindow):
             self,
             "Acerca de BootGestor",
             """
-            <h3>BootGestor v1.0</h3>
+            <h3>BootGestor v2.0 (Mejorado)</h3>
             <p>Sistema de automatización para gestión de glosas</p>
             
             <h4>Módulos Disponibles:</h4>
             <ul>
-            <li>✅ Gestión de Glosas</li>
+            <li>✅ Gestión de Glosas (v2.0 con BD)</li>
             <li>🚧 Reportes (En desarrollo)</li>
             <li>🚧 Auditoría (Planificado)</li>
+            </ul>
+            
+            <h4>Nuevas Funcionalidades v2.0:</h4>
+            <ul>
+            <li>✅ Base de datos de glosas con estados</li>
+            <li>✅ Estadísticas en tiempo real</li>
+            <li>✅ Tabla de cuentas procesadas</li>
+            <li>✅ Control de procesamiento inteligente</li>
             </ul>
             
             <h4>Desarrollado con:</h4>
@@ -507,7 +564,7 @@ class MainWindow(QMainWindow):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            self.logger.info("Cerrando aplicación BootGestor")
+            self.logger.info("Cerrando aplicación BootGestor v2.0")
             event.accept()
         else:
             event.ignore()
