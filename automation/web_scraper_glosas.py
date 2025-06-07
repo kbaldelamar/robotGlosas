@@ -4,7 +4,7 @@ from typing import Optional
 from playwright.async_api import Page
 from automation.login_handler import LoginHandler
 from automation.navigation_handler import NavigationHandler, AutomationState, NavigationState
-from automation.glosas_table_processor import GlosasTableProcessor
+from automation.procesador_tabla_glosas import ProcesadorTablaGlosas  # CLASE ACTUALIZADA
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
 from config.settings import Settings
@@ -12,15 +12,18 @@ from config.settings import Settings
 class WebScraperGlosas:
     """
     Automatizador específico para gestión de glosas.
-    Extiende la funcionalidad base con lógica específica de glosas.
+    VERSIÓN ACTUALIZADA CON ARQUITECTURA SEPARADA:
+    - Usa ProcesadorTablaGlosas para manejar la tabla
+    - ProcesadorTablaGlosas usa ProcesadorGlosaIndividual para cada glosa
+    - Arquitectura modular y mantenible
     """
     
     def __init__(self):
-        """Inicializa el web scraper de glosas."""
+        """Inicializa el web scraper de glosas con arquitectura actualizada."""
         self.logger = logging.getLogger(__name__)
         self.login_handler = LoginHandler()
         self.navigation_handler: Optional[NavigationHandler] = None
-        self.glosas_processor: Optional[GlosasTableProcessor] = None
+        self.procesador_tabla: Optional[ProcesadorTablaGlosas] = None  # CAMBIO: Nombre más claro
         self.page: Optional[Page] = None
         
         # Base de datos específica para glosas
@@ -33,7 +36,16 @@ class WebScraperGlosas:
             current_method="__init__"
         )
         
-        self._log_state("WebScraperGlosas inicializado")
+        # Estadísticas globales
+        self.estadisticas_globales = {
+            'inicio_proceso': 0,
+            'fin_proceso': 0,
+            'total_cuentas_procesadas': 0,
+            'total_cuentas_fallidas': 0,
+            'tiempo_total': 0
+        }
+        
+        self._log_state("WebScraperGlosas inicializado con arquitectura separada")
         
     def _log_state(self, message: str, level: str = "info"):
         """Log con información de estado actual."""
@@ -49,7 +61,8 @@ class WebScraperGlosas:
         
     async def start_glosas_automation(self, username: str, password: str) -> bool:
         """
-        Inicia la automatización completa de glosas.
+        MÉTODO PRINCIPAL: Inicia la automatización completa de glosas.
+        VERSIÓN ACTUALIZADA con arquitectura separada.
         
         Args:
             username (str): Usuario para login
@@ -61,44 +74,58 @@ class WebScraperGlosas:
         try:
             self.automation_state.update(
                 method_name="start_glosas_automation",
-                action="Iniciando automatización de glosas"
+                action="Iniciando automatización completa de glosas"
             )
             
-            self._log_state("=== INICIANDO AUTOMATIZACIÓN DE GLOSAS ===")
+            self.estadisticas_globales['inicio_proceso'] = asyncio.get_event_loop().time()
             
-            # PASO 1: LOGIN
-            if not await self._do_login(username, password):
+            self._log_state("🚀 === INICIANDO AUTOMATIZACIÓN COMPLETA DE GLOSAS ===")
+            self._log_state("🏗️ Arquitectura: Tabla + Procesamiento Individual Separado")
+            self._log_state("="*100)
+            
+            # ETAPA 1: LOGIN
+            if not await self._etapa1_login(username, password):
                 return False
             
-            # PASO 2: NAVEGACIÓN A BOLSA RESPUESTA
-            if not await self._navigate_to_bolsa_respuesta():
+            # ETAPA 2: NAVEGACIÓN A BOLSA RESPUESTA
+            if not await self._etapa2_navegacion():
                 return False
             
-            # PASO 3: PROCESAMIENTO DE TABLA PRINCIPAL
-            if not await self._process_main_table():
+            # ETAPA 3: PROCESAMIENTO COMPLETO CON ARQUITECTURA SEPARADA
+            if not await self._etapa3_procesamiento_completo():
                 return False
             
-            self._log_state("=== AUTOMATIZACIÓN DE GLOSAS COMPLETADA ===")
+            self.estadisticas_globales['fin_proceso'] = asyncio.get_event_loop().time()
+            self.estadisticas_globales['tiempo_total'] = (
+                self.estadisticas_globales['fin_proceso'] - 
+                self.estadisticas_globales['inicio_proceso']
+            )
+            
+            self._log_state("🎉 === AUTOMATIZACIÓN DE GLOSAS COMPLETADA EXITOSAMENTE ===")
+            await self._mostrar_resumen_final()
+            
             return True
             
         except Exception as e:
             self.automation_state.update(state=NavigationState.ERROR)
-            self._log_state(f"Error en automatización de glosas: {e}", "error")
+            self._log_state(f"❌ Error crítico en automatización de glosas: {e}", "error")
             return False
         finally:
             # Mantener navegador abierto para inspección
-            await self._keep_open_for_inspection()
+            await self._mantener_abierto_para_inspeccion()
     
-    async def _do_login(self, username: str, password: str) -> bool:
-        """Realiza el proceso de login."""
+    async def _etapa1_login(self, username: str, password: str) -> bool:
+        """ETAPA 1: Realiza el proceso de login."""
         try:
             self.automation_state.update(
-                method_name="_do_login",
+                method_name="_etapa1_login",
                 state=NavigationState.LOGIN_PAGE,
-                action="Realizando login"
+                action="ETAPA 1: Realizando login"
             )
             
-            self._log_state("Iniciando proceso de login")
+            self._log_state("🔐 ETAPA 1: PROCESO DE LOGIN")
+            self._log_state("-"*50)
+            self._log_state(f"Usuario: {username}")
             
             login_success = await self.login_handler.login(username, password)
             
@@ -108,126 +135,192 @@ class WebScraperGlosas:
                     state=NavigationState.DASHBOARD,
                     action="Login exitoso"
                 )
-                self._log_state("Login completado exitosamente")
+                self._log_state("✅ ETAPA 1 COMPLETADA: Login exitoso")
+                self._log_state("-"*50)
                 return True
             else:
                 self.automation_state.update(state=NavigationState.ERROR)
-                self._log_state("Login falló", "error")
+                self._log_state("❌ ETAPA 1 FALLIDA: Login falló", "error")
                 return False
                 
         except Exception as e:
             self.automation_state.update(state=NavigationState.ERROR)
-            self._log_state(f"Error en login: {e}", "error")
+            self._log_state(f"❌ Error en ETAPA 1 (login): {e}", "error")
             return False
     
-    async def _navigate_to_bolsa_respuesta(self) -> bool:
-        """Navega hasta la tabla de Bolsa Respuesta."""
+    async def _etapa2_navegacion(self) -> bool:
+        """ETAPA 2: Navega hasta la tabla de Bolsa Respuesta."""
         try:
             self.automation_state.update(
-                method_name="_navigate_to_bolsa_respuesta",
-                action="Navegando a Bolsa Respuesta"
+                method_name="_etapa2_navegacion",
+                action="ETAPA 2: Navegando a Bolsa Respuesta"
             )
             
-            self._log_state("Iniciando navegación a Bolsa Respuesta")
+            self._log_state("🧭 ETAPA 2: NAVEGACIÓN A BOLSA RESPUESTA")
+            self._log_state("-"*50)
             
             # Inicializar manejador de navegación
             self.navigation_handler = NavigationHandler(self.page, self.automation_state)
             
             # Navegar a Respuesta Glosas
+            self._log_state("📍 Navegando a Respuesta Glosas...")
             if not await self.navigation_handler.navigate_to_respuesta_glosas():
-                self._log_state("Error navegando a Respuesta Glosas", "error")
+                self._log_state("❌ Error navegando a Respuesta Glosas", "error")
                 return False
             
             # Navegar a Bolsa Respuesta
+            self._log_state("📍 Navegando a Bolsa Respuesta...")
             if not await self.navigation_handler.navigate_to_bolsa_respuesta():
-                self._log_state("Error navegando a Bolsa Respuesta", "error")
+                self._log_state("❌ Error navegando a Bolsa Respuesta", "error")
                 return False
             
-            self._log_state("Navegación a Bolsa Respuesta completada")
+            self._log_state("✅ ETAPA 2 COMPLETADA: Navegación exitosa")
+            self._log_state("-"*50)
             return True
             
         except Exception as e:
-            self._log_state(f"Error en navegación: {e}", "error")
+            self._log_state(f"❌ Error en ETAPA 2 (navegación): {e}", "error")
             return False
     
-    async def _process_main_table(self) -> bool:
+    async def _etapa3_procesamiento_completo(self) -> bool:
         """
-        Procesa la tabla principal de Bolsa Respuesta.
+        ETAPA 3: Procesamiento completo usando arquitectura separada.
         
         Returns:
             bool: True si se procesó correctamente
         """
         try:
             self.automation_state.update(
-                method_name="_process_main_table",
-                action="Procesando tabla principal de Bolsa Respuesta"
+                method_name="_etapa3_procesamiento_completo",
+                action="ETAPA 3: Procesamiento completo con arquitectura separada"
             )
             
-            self._log_state("Iniciando procesamiento de tabla principal")
+            self._log_state("⚙️ ETAPA 3: PROCESAMIENTO COMPLETO")
+            self._log_state("-"*50)
+            self._log_state("🏗️ Inicializando ProcesadorTablaGlosas...")
             
-            # Inicializar procesador de tabla
-            self.glosas_processor = GlosasTableProcessor(self.page, self.automation_state)
+            # Inicializar procesador de tabla con arquitectura separada
+            self.procesador_tabla = ProcesadorTablaGlosas(self.page, self.automation_state)
             
-            # Procesar todas las filas
-            procesadas, saltadas = await self.glosas_processor.process_table_rows()
+            self._log_state("🚀 Iniciando procesamiento con arquitectura separada...")
+            self._log_state("   • ProcesadorTablaGlosas: Maneja tabla y navegación")
+            self._log_state("   • ProcesadorGlosaIndividual: Maneja cada glosa específica")
             
-            self._log_state(f"Tabla principal procesada - Procesadas: {procesadas}, Saltadas: {saltadas}")
+            # Procesar todas las filas con la nueva arquitectura
+            procesadas, saltadas = await self.procesador_tabla.procesar_filas_tabla()
+            
+            # Actualizar estadísticas globales
+            self.estadisticas_globales['total_cuentas_procesadas'] = procesadas
+            self.estadisticas_globales['total_cuentas_fallidas'] = saltadas
+            
+            self._log_state("-"*50)
+            self._log_state("📊 RESULTADOS DE PROCESAMIENTO:")
+            self._log_state(f"   • Cuentas procesadas exitosamente: {procesadas}")
+            self._log_state(f"   • Cuentas fallidas/saltadas: {saltadas}")
             
             if procesadas == 0 and saltadas == 0:
-                self._log_state("No se procesaron filas", "warning")
+                self._log_state("⚠️ ETAPA 3: No se procesaron cuentas", "warning")
                 return False
             
+            self._log_state("✅ ETAPA 3 COMPLETADA: Procesamiento terminado")
+            self._log_state("-"*50)
             return True
             
         except Exception as e:
-            self._log_state(f"Error procesando tabla principal: {e}", "error")
+            self._log_state(f"❌ Error en ETAPA 3 (procesamiento): {e}", "error")
             return False
     
-    async def _keep_open_for_inspection(self):
+    async def _mantener_abierto_para_inspeccion(self):
         """Mantiene el navegador abierto para inspeccionar la página."""
         try:
             self.automation_state.update(
-                method_name="_keep_open_for_inspection",
+                method_name="_mantener_abierto_para_inspeccion",
                 action="Manteniendo navegador abierto para inspección"
             )
             
-            self._log_state("Navegador abierto para inspección - Se cerrará en 60 segundos")
+            self._log_state("🔍 INSPECCIÓN FINAL")
+            self._log_state("-"*50)
+            self._log_state("🌐 Navegador abierto para inspección - Se cerrará en 60 segundos")
             
             # Obtener estado final
             if self.navigation_handler:
                 final_info = await self.navigation_handler.get_current_page_info()
-                self._log_state(f"Estado final: {final_info}")
+                self._log_state(f"📋 Estado final: {final_info}")
             
-            # Mostrar estadísticas finales
-            await self._show_final_stats()
+            # Mostrar estadísticas finales de BD
+            await self._mostrar_estadisticas_bd()
             
-            # Mantener abierto por 1 minuto
+            self._log_state("⏳ Manteniendo navegador abierto por 60 segundos...")
             await asyncio.sleep(60)
             
-            self._log_state("Cerrando navegador...")
+            self._log_state("🔒 Cerrando navegador...")
             await self.login_handler.logout()
             
         except Exception as e:
-            self._log_state(f"Error manteniendo navegador abierto: {e}", "error")
+            self._log_state(f"❌ Error manteniendo navegador abierto: {e}", "error")
     
-    async def _show_final_stats(self):
-        """Muestra estadísticas finales del procesamiento."""
+    async def _mostrar_resumen_final(self):
+        """Muestra resumen final completo del procesamiento."""
         try:
-            # Obtener estadísticas de la base de datos
-            stats = await self._get_processing_stats()
+            tiempo_total = self.estadisticas_globales['tiempo_total']
+            procesadas = self.estadisticas_globales['total_cuentas_procesadas']
+            fallidas = self.estadisticas_globales['total_cuentas_fallidas']
+            total = procesadas + fallidas
             
-            self._log_state("=== ESTADÍSTICAS FINALES ===")
-            self._log_state(f"Cuentas PENDIENTES: {stats['pendientes']}")
-            self._log_state(f"Cuentas EN_PROCESO: {stats['en_proceso']}")
-            self._log_state(f"Cuentas COMPLETADAS: {stats['completadas']}")
-            self._log_state(f"Cuentas FALLIDAS: {stats['fallidas']}")
-            self._log_state(f"Total de glosas procesadas: {stats['glosas_procesadas']}")
-            self._log_state("============================")
+            self._log_state("")
+            self._log_state("🎯 RESUMEN FINAL DE AUTOMATIZACIÓN")
+            self._log_state("="*100)
+            self._log_state(f"⏱️  TIEMPO TOTAL DE EJECUCIÓN: {tiempo_total:.2f} segundos ({tiempo_total/60:.1f} minutos)")
+            self._log_state(f"📊 CUENTAS TOTALES PROCESADAS: {total}")
+            self._log_state(f"✅ CUENTAS EXITOSAS: {procesadas}")
+            self._log_state(f"❌ CUENTAS FALLIDAS: {fallidas}")
+            
+            if total > 0:
+                tasa_exito = (procesadas / total) * 100
+                self._log_state(f"📈 TASA DE ÉXITO GLOBAL: {tasa_exito:.1f}%")
+                
+                if procesadas > 0:
+                    tiempo_promedio = tiempo_total / procesadas
+                    self._log_state(f"⚡ TIEMPO PROMEDIO POR CUENTA: {tiempo_promedio:.2f} segundos")
+                    
+                    velocidad = procesadas / (tiempo_total / 3600)  # cuentas por hora
+                    self._log_state(f"🚀 VELOCIDAD DE PROCESAMIENTO: {velocidad:.1f} cuentas/hora")
+            
+            self._log_state("="*100)
+            
+            # Determinar resultado final
+            if procesadas > 0:
+                if tasa_exito >= 80:
+                    self._log_state("🎉 RESULTADO: AUTOMATIZACIÓN EXITOSA")
+                elif tasa_exito >= 50:
+                    self._log_state("⚠️ RESULTADO: AUTOMATIZACIÓN PARCIALMENTE EXITOSA")
+                else:
+                    self._log_state("❌ RESULTADO: AUTOMATIZACIÓN CON PROBLEMAS")
+            else:
+                self._log_state("❌ RESULTADO: AUTOMATIZACIÓN FALLIDA")
             
         except Exception as e:
-            self._log_state(f"Error obteniendo estadísticas: {e}", "error")
+            self._log_state(f"❌ Error mostrando resumen final: {e}", "error")
     
-    async def _get_processing_stats(self) -> dict:
+    async def _mostrar_estadisticas_bd(self):
+        """Muestra estadísticas finales desde la base de datos."""
+        try:
+            stats = await self._obtener_estadisticas_bd()
+            
+            self._log_state("")
+            self._log_state("💾 ESTADÍSTICAS DESDE BASE DE DATOS")
+            self._log_state("-"*50)
+            self._log_state(f"📋 Cuentas PENDIENTES: {stats['pendientes']}")
+            self._log_state(f"⚙️ Cuentas EN_PROCESO: {stats['en_proceso']}")
+            self._log_state(f"✅ Cuentas COMPLETADAS: {stats['completadas']}")
+            self._log_state(f"❌ Cuentas FALLIDAS: {stats['fallidas']}")
+            self._log_state(f"🔍 Total de glosas procesadas: {stats['glosas_procesadas']}")
+            self._log_state("-"*50)
+            
+        except Exception as e:
+            self._log_state(f"❌ Error obteniendo estadísticas de BD: {e}", "error")
+    
+    async def _obtener_estadisticas_bd(self) -> dict:
         """Obtiene estadísticas del procesamiento desde la BD."""
         try:
             with self.db_manager.get_connection() as conn:
@@ -259,21 +352,25 @@ class WebScraperGlosas:
                     elif estado == 'fallido':
                         stats['fallidas'] = count
                 
-                # Total de glosas procesadas
-                cursor = conn.execute("""
-                    SELECT COUNT(*) as count 
-                    FROM glosa_items_detalle 
-                    WHERE fue_procesado = 1
-                """)
-                
-                row = cursor.fetchone()
-                if row:
-                    stats['glosas_procesadas'] = row['count']
+                # Total de glosas procesadas (si tienes tabla de detalles)
+                try:
+                    cursor = conn.execute("""
+                        SELECT COUNT(*) as count 
+                        FROM glosa_items_detalle 
+                        WHERE fue_procesado = 1
+                    """)
+                    
+                    row = cursor.fetchone()
+                    if row:
+                        stats['glosas_procesadas'] = row['count']
+                except:
+                    # Si no existe la tabla de detalles, usar 0
+                    stats['glosas_procesadas'] = 0
                 
                 return stats
                 
         except Exception as e:
-            self._log_state(f"Error obteniendo estadísticas de BD: {e}", "error")
+            self._log_state(f"❌ Error obteniendo estadísticas de BD: {e}", "error")
             return {
                 'pendientes': 0,
                 'en_proceso': 0,
@@ -281,22 +378,3 @@ class WebScraperGlosas:
                 'fallidas': 0,
                 'glosas_procesadas': 0
             }
-
-# EJEMPLO DE USO
-async def main_glosas_example():
-    """Ejemplo de uso del automatizador de glosas."""
-    scraper = WebScraperGlosas()
-    
-    # Usar credenciales de configuración
-    username = Settings.DEFAULT_USERNAME
-    password = Settings.DEFAULT_PASSWORD
-    
-    success = await scraper.start_glosas_automation(username, password)
-    
-    if success:
-        print("✅ Automatización de glosas completada exitosamente")
-    else:
-        print("❌ Error en automatización de glosas")
-
-if __name__ == "__main__":
-    asyncio.run(main_glosas_example())

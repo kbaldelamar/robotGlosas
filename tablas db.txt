@@ -1,0 +1,143 @@
+-- ===================================================
+-- ESQUEMA DE BASE DE DATOS PARA GESTIÓN DE GLOSAS (CORREGIDO)
+-- ===================================================
+
+-- 1. TABLA DE CONFIGURACIÓN DE RESPUESTAS AUTOMÁTICAS
+CREATE TABLE IF NOT EXISTS glosas_respuestas_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo VARCHAR(100) NOT NULL,                    -- Ej: "TARIFAS", "MEDICAMENTOS", etc.
+    justificacion_patron VARCHAR(500) NOT NULL,     -- Patrón de justificación (puede usar LIKE)
+    respuesta_automatica TEXT NOT NULL,            -- Respuesta que se va a escribir
+    url_pdf VARCHAR(500),                          -- URL del PDF de soporte
+    activo BOOLEAN DEFAULT 1,                     -- Si está activa esta configuración
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+    fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Índice único para evitar duplicados
+    UNIQUE(tipo, justificacion_patron)
+);
+
+-- 2. TABLA DE DETALLES DE GLOSAS PROCESADAS
+CREATE TABLE IF NOT EXISTS glosas_detalles_procesadas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idcuenta VARCHAR(50) NOT NULL,                 -- ID de la cuenta principal
+    id_glosa VARCHAR(20) NOT NULL,                 -- ID de la glosa específica (ej: 2671508)
+    id_item VARCHAR(20),                           -- ID del item
+    descripcion_item TEXT,                         -- Descripción del item
+    tipo VARCHAR(100),                             -- Tipo de glosa
+    descripcion VARCHAR(200),                      -- Descripción corta
+    justificacion TEXT,                            -- Justificación completa
+    valor_glosado DECIMAL(15,2),                   -- Valor glosado
+    estado_original VARCHAR(50),                   -- Estado original (SIN RESPUESTA)
+    
+    -- Datos del procesamiento
+    respuesta_aplicada TEXT,                       -- Respuesta que se aplicó
+    config_id INTEGER,                             -- ID de la configuración usada
+    estado_procesamiento VARCHAR(50) DEFAULT 'PENDIENTE', -- PENDIENTE, PROCESADO, ERROR
+    fecha_procesamiento DATETIME,
+    error_mensaje TEXT,                            -- Si hubo error
+    
+    -- Metadatos
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Relaciones
+    FOREIGN KEY (config_id) REFERENCES glosas_respuestas_config(id),
+    
+    -- Constraint único para no procesar la misma glosa dos veces
+    UNIQUE(idcuenta, id_glosa)
+);
+
+-- 3. TABLA DE LOG DE PROCESAMIENTO (OPCIONAL - PARA AUDITORÍA)
+CREATE TABLE IF NOT EXISTS glosas_log_procesamiento (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idcuenta VARCHAR(50) NOT NULL,
+    id_glosa VARCHAR(20) NOT NULL,
+    accion VARCHAR(100),                           -- CLICK_BOTON, ESCRIBIR_RESPUESTA, etc.
+    detalle TEXT,
+    fecha_accion DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ===================================================
+-- CREACIÓN DE ÍNDICES (DESPUÉS DE LAS TABLAS)
+-- ===================================================
+
+-- Índices para glosas_respuestas_config
+CREATE INDEX IF NOT EXISTS idx_glosas_config_tipo ON glosas_respuestas_config(tipo);
+CREATE INDEX IF NOT EXISTS idx_glosas_config_activo ON glosas_respuestas_config(activo);
+
+-- Índices para glosas_detalles_procesadas
+CREATE INDEX IF NOT EXISTS idx_cuenta ON glosas_detalles_procesadas(idcuenta);
+CREATE INDEX IF NOT EXISTS idx_estado ON glosas_detalles_procesadas(estado_procesamiento);
+CREATE INDEX IF NOT EXISTS idx_tipo_justif ON glosas_detalles_procesadas(tipo, justificacion);
+CREATE INDEX IF NOT EXISTS idx_glosas_detalle_estado ON glosas_detalles_procesadas(estado_procesamiento);
+CREATE INDEX IF NOT EXISTS idx_glosas_detalle_fecha ON glosas_detalles_procesadas(fecha_procesamiento);
+
+-- Índices para glosas_log_procesamiento
+CREATE INDEX IF NOT EXISTS idx_cuenta_glosa ON glosas_log_procesamiento(idcuenta, id_glosa);
+
+-- ===================================================
+-- DATOS DE EJEMPLO PARA CONFIGURACIÓN
+-- ===================================================
+
+-- Insertar configuraciones ejemplo basadas en los datos mostrados
+INSERT OR IGNORE INTO glosas_respuestas_config (tipo, justificacion_patron, respuesta_automatica, url_pdf) VALUES
+(
+    'TARIFAS', 
+    '%MAYOR VALOR COBRADO EN%SERVICIO DE ALOJAMIENTO%', 
+    'El valor cobrado corresponde a la tarifa autorizada según contrato vigente y normatividad aplicable. Se adjunta soporte tarifario y autorización del servicio.',
+    'https://example.com/soporte_tarifas_alojamiento.pdf'
+),
+(
+    'TARIFAS', 
+    '%MAYOR VALOR COBRADO EN%ALBERGUE ACOMPANANTE%', 
+    'El cobro del albergue para acompañante está justificado según tarifa contractual autorizada. Se cuenta con la debida autorización y documentación de soporte.',
+    'https://example.com/soporte_albergue_acompanante.pdf'
+),
+(
+    'TARIFAS', 
+    '%MAYOR VALOR COBRADO%', 
+    'El valor facturado corresponde a las tarifas autorizadas y vigentes según contrato. Se adjunta documentación soporte.',
+    'https://example.com/soporte_tarifas_generales.pdf'
+),
+(
+    'MEDICAMENTOS', 
+    '%MEDICAMENTO NO AUTORIZADO%', 
+    'El medicamento fue suministrado por prescripción médica urgente. Se adjunta orden médica y justificación clínica.',
+    'https://example.com/soporte_medicamentos.pdf'
+),
+(
+    'PROCEDIMIENTOS', 
+    '%PROCEDIMIENTO NO AUTORIZADO%', 
+    'El procedimiento fue realizado por necesidad médica urgente con autorización verbal posterior. Se adjunta documentación clínica.',
+    'https://example.com/soporte_procedimientos.pdf'
+);
+
+-- ===================================================
+-- VISTAS ÚTILES PARA CONSULTAS
+-- ===================================================
+
+-- Vista para ver configuraciones activas
+CREATE VIEW IF NOT EXISTS vw_glosas_config_activas AS
+SELECT 
+    id,
+    tipo,
+    justificacion_patron,
+    respuesta_automatica,
+    url_pdf,
+    fecha_creacion
+FROM glosas_respuestas_config 
+WHERE activo = 1
+ORDER BY tipo, justificacion_patron;
+
+-- Vista para estadísticas de procesamiento
+CREATE VIEW IF NOT EXISTS vw_glosas_estadisticas AS
+SELECT 
+    idcuenta,
+    COUNT(*) as total_glosas,
+    SUM(CASE WHEN estado_procesamiento = 'PROCESADO' THEN 1 ELSE 0 END) as procesadas,
+    SUM(CASE WHEN estado_procesamiento = 'ERROR' THEN 1 ELSE 0 END) as errores,
+    SUM(CASE WHEN estado_procesamiento = 'PENDIENTE' THEN 1 ELSE 0 END) as pendientes,
+    SUM(valor_glosado) as valor_total_glosado,
+    MAX(fecha_procesamiento) as ultima_actualizacion
+FROM glosas_detalles_procesadas 
+GROUP BY idcuenta;
