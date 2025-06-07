@@ -40,6 +40,7 @@ class NavigationHandler:
     """
     Maneja la navegación específica en el sistema CTA Médicas.
     Controla el flujo entre menús y secciones del sistema.
+    Versión optimizada con selectores únicos.
     """
     
     def __init__(self, page: Page, automation_state: AutomationState):
@@ -99,11 +100,11 @@ class NavigationHandler:
             # Actualizar información de página actual
             await self._update_page_info()
             
-            # Selector XPath específico para "Respuesta Glosas"
-            xpath_selector = "//span[@class='sidebar-nav-name'][contains(.,'Respuesta Glosas')]"
+            # USAR SOLO EL SELECTOR QUE FUNCIONA - XPath específico
+            selector = "//span[@class='sidebar-nav-name'][contains(.,'Respuesta Glosas')]"
             
             # Buscar el elemento
-            element = self.page.locator(f"xpath={xpath_selector}")
+            element = self.page.locator(f"xpath={selector}")
             
             # Verificar que existe
             if await element.count() == 0:
@@ -118,9 +119,6 @@ class NavigationHandler:
             await element.scroll_into_view_if_needed()
             await asyncio.sleep(0.5)
             
-            # Tomar screenshot antes del clic
-            await self.page.screenshot(path="before_click_respuesta_glosas.png")
-            
             # Hacer clic en "Respuesta Glosas"
             await element.click()
             self._log_state("Clic realizado en 'Respuesta Glosas'")
@@ -128,9 +126,6 @@ class NavigationHandler:
             # Esperar a que cargue
             await self.page.wait_for_load_state('networkidle', timeout=10000)
             await asyncio.sleep(1)
-            
-            # Tomar screenshot después del clic
-            await self.page.screenshot(path="after_click_respuesta_glosas.png")
             
             # Verificar que la navegación fue exitosa
             success = await self._verify_respuesta_glosas_loaded()
@@ -177,11 +172,11 @@ class NavigationHandler:
             # Actualizar información de página actual
             await self._update_page_info()
             
-            # Selector XPath específico para "Bolsa Respuesta"
-            xpath_selector = "//span[@class='sidebar-nav-name'][contains(.,'Bolsa Respuesta')]"
+            # USAR SOLO EL SELECTOR QUE FUNCIONA - XPath específico
+            selector = "//span[@class='sidebar-nav-name'][contains(.,'Bolsa Respuesta')]"
             
             # Buscar el elemento
-            element = self.page.locator(f"xpath={xpath_selector}")
+            element = self.page.locator(f"xpath={selector}")
             
             # Verificar que existe
             if await element.count() == 0:
@@ -196,9 +191,6 @@ class NavigationHandler:
             await element.scroll_into_view_if_needed()
             await asyncio.sleep(0.5)
             
-            # Tomar screenshot antes del clic
-            await self.page.screenshot(path="before_click_bolsa_respuesta.png")
-            
             # Hacer clic en "Bolsa Respuesta"
             await element.click()
             self._log_state("Clic realizado en 'Bolsa Respuesta'")
@@ -206,9 +198,6 @@ class NavigationHandler:
             # Esperar a que cargue
             await self.page.wait_for_load_state('networkidle', timeout=15000)
             await asyncio.sleep(2)
-            
-            # Tomar screenshot después del clic
-            await self.page.screenshot(path="after_click_bolsa_respuesta.png")
             
             # Verificar que la navegación fue exitosa
             success = await self._verify_bolsa_respuesta_loaded()
@@ -234,6 +223,7 @@ class NavigationHandler:
     async def _verify_respuesta_glosas_loaded(self) -> bool:
         """
         Verifica que la sección Respuesta Glosas se haya cargado correctamente.
+        Versión optimizada con selector único.
         
         Returns:
             bool: True si se cargó correctamente
@@ -244,34 +234,22 @@ class NavigationHandler:
             # Actualizar información de página
             await self._update_page_info()
             
-            # Indicadores de que estamos en Respuesta Glosas
-            indicators = [
-                "//span[@class='sidebar-nav-name'][contains(.,'Bolsa Respuesta')]",  # Submenu debe aparecer
-                "text=Respuesta Glosas",
-                "[class*='respuesta']",
-                "[class*='glosas']"
-            ]
+            # USAR SOLO EL SELECTOR QUE FUNCIONA
+            # El indicador principal es que aparezca el submenú "Bolsa Respuesta"
+            selector = "//span[@class='sidebar-nav-name'][contains(.,'Bolsa Respuesta')]"
+            element = self.page.locator(f"xpath={selector}")
             
-            for indicator in indicators:
-                try:
-                    if indicator.startswith("//"):
-                        element = self.page.locator(f"xpath={indicator}")
-                    else:
-                        element = self.page.locator(indicator)
-                    
-                    if await element.count() > 0:
-                        self._log_state(f"Indicador de Respuesta Glosas encontrado: {indicator}")
-                        return True
-                except:
-                    continue
-            
-            # Verificar cambio en URL
-            current_url = self.page.url
-            if 'respuesta' in current_url.lower() or 'glosa' in current_url.lower():
-                self._log_state(f"URL indica Respuesta Glosas: {current_url}")
+            if await element.count() > 0:
+                self._log_state("✅ Respuesta Glosas verificado - submenú visible")
                 return True
             
-            self._log_state("No se pudo verificar que Respuesta Glosas esté cargado", "warning")
+            # Si el selector principal falla, verificar URL como respaldo
+            current_url = self.page.url
+            if 'respuesta' in current_url.lower() or 'glosa' in current_url.lower():
+                self._log_state(f"✅ Respuesta Glosas verificado por URL: {current_url}")
+                return True
+            
+            self._log_state("❌ No se pudo verificar que Respuesta Glosas esté cargado", "warning")
             return False
             
         except Exception as e:
@@ -281,6 +259,7 @@ class NavigationHandler:
     async def _verify_bolsa_respuesta_loaded(self) -> bool:
         """
         Verifica que la sección Bolsa Respuesta se haya cargado correctamente.
+        Versión optimizada con selector único.
         
         Returns:
             bool: True si se cargó correctamente
@@ -291,32 +270,22 @@ class NavigationHandler:
             # Actualizar información de página
             await self._update_page_info()
             
-            # Indicadores de que estamos en Bolsa Respuesta
-            indicators = [
-                "text=Bolsa Respuesta",
-                "text=RESPUESTA GLOSA",  # Según la imagen que vi
-                "[class*='bolsa']",
-                "[class*='respuesta']",
-                "table",  # Debe aparecer una tabla
-                ".datatable"
-            ]
+            # USAR SOLO EL SELECTOR QUE FUNCIONA MEJOR
+            # El texto "Bolsa Respuesta" es el indicador más confiable
+            selector = "text=Bolsa Respuesta"
+            element = self.page.locator(selector)
             
-            for indicator in indicators:
-                try:
-                    element = self.page.locator(indicator)
-                    if await element.count() > 0:
-                        self._log_state(f"Indicador de Bolsa Respuesta encontrado: {indicator}")
-                        return True
-                except:
-                    continue
-            
-            # Verificar cambio en URL
-            current_url = self.page.url
-            if 'bolsa' in current_url.lower() or 'respuesta' in current_url.lower():
-                self._log_state(f"URL indica Bolsa Respuesta: {current_url}")
+            if await element.count() > 0:
+                self._log_state("✅ Bolsa Respuesta verificado con text selector")
                 return True
             
-            self._log_state("No se pudo verificar que Bolsa Respuesta esté cargado", "warning")
+            # Si el selector principal falla, verificar URL como respaldo
+            current_url = self.page.url
+            if 'bolsa' in current_url.lower() or 'respuesta' in current_url.lower():
+                self._log_state(f"✅ Bolsa Respuesta verificado por URL: {current_url}")
+                return True
+            
+            self._log_state("❌ No se pudo verificar que Bolsa Respuesta esté cargado", "warning")
             return False
             
         except Exception as e:

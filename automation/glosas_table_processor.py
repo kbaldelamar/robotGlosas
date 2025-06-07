@@ -5,11 +5,15 @@ from playwright.async_api import Page
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
 from automation.navigation_handler import AutomationState, NavigationState
+from automation.procesador_glosa_individual import ProcesadorGlosaIndividual
 
-class GlosasTableProcessor:
+class ProcesadorTablaGlosas:
     """
     Procesador de la tabla principal de glosas (Bolsa Respuesta).
-    Maneja la configuración, iteración y lógica de decisión de procesamiento.
+    VERSIÓN INTEGRADA CON ARQUITECTURA SEPARADA: 
+    1. Extrae todos los datos de la tabla
+    2. Procesa cada cuenta usando ProcesadorGlosaIndividual
+    3. Maneja la navegación entre tabla y procesamiento individual
     """
     
     def __init__(self, page: Page, automation_state: AutomationState):
@@ -25,341 +29,392 @@ class GlosasTableProcessor:
         self.logger = logging.getLogger(__name__)
         self.db_manager = DatabaseManagerGlosas()
         
+        # INSTANCIA DE PROCESADOR INDIVIDUAL
+        self.procesador_individual = ProcesadorGlosaIndividual(
+            page=self.page,
+            automation_state=self.state,
+            db_manager=self.db_manager
+        )
+        
         # Selectores específicos de la tabla
-        self.selectors = {
-            'tabla_length_select': "select[name='tablaRespuestaGlosa_length']",
-            'option_todos': "option[value='-1']",
-            'tabla_body': "#tablaRespuestaGlosa tbody",
+        self.selectores = {
+            'select_longitud_tabla': "//select[contains(@name,'tablaRespuestaGlosa_length')]",
+            'opcion_100_xpath': "//option[@value='100']",
+            'opcion_100_css': "option[value='100']",
+            'opcion_100_especifica': "//option[@value='100'][contains(.,'100')]",
+            'cuerpo_tabla': "#tablaRespuestaGlosa tbody",
             'filas_tabla': "#tablaRespuestaGlosa tbody tr",
             'boton_iniciar': ".btRespuestaStart",
-            'tabla_info': "#tablaRespuestaGlosa_info"
+            'info_tabla': "#tablaRespuestaGlosa_info"
+        }
+        
+        # URL base para regresar a la tabla
+        self.url_tabla_base = None
+        
+        # Estadísticas de procesamiento
+        self.estadisticas = {
+            'total_cuentas': 0,
+            'procesadas_exitosas': 0,
+            'procesadas_fallidas': 0,
+            'saltadas': 0,
+            'tiempo_inicio': 0,
+            'tiempo_fin': 0
         }
         
         self.state.update(
-            class_name="GlosasTableProcessor",
+            class_name="ProcesadorTablaGlosas",
             method_name="__init__"
         )
         
-        self._log_state("GlosasTableProcessor inicializado")
+        self._registrar_estado("ProcesadorTablaGlosas inicializado con procesador individual integrado")
     
-    def _log_state(self, message: str, level: str = "info"):
+    def _registrar_estado(self, mensaje: str, nivel: str = "info"):
         """Log con información de estado actual."""
-        state_info = f"[{self.state.current_class}.{self.state.current_method}]"
-        full_message = f"{state_info} {message}"
+        info_estado = f"[{self.state.current_class}.{self.state.current_method}]"
+        mensaje_completo = f"{info_estado} {mensaje}"
         
-        if level == "info":
-            self.logger.info(full_message)
-        elif level == "warning":
-            self.logger.warning(full_message)
-        elif level == "error":
-            self.logger.error(full_message)
+        if nivel == "info":
+            self.logger.info(mensaje_completo)
+        elif nivel == "warning":
+            self.logger.warning(mensaje_completo)
+        elif nivel == "error":
+            self.logger.error(mensaje_completo)
     
-    async def configure_table_show_all(self) -> bool:
+    async def procesar_filas_tabla(self) -> Tuple[int, int]:
         """
-        Configura la tabla para mostrar todos los registros.
-        VERSIÓN MEJORADA CON DEPURACIÓN
+        MÉTODO PRINCIPAL: Procesa filas con lógica separada e integración completa.
         
-        Returns:
-            bool: True si se configuró correctamente
-        """
-        try:
-            self.state.update(
-                method_name="configure_table_show_all",
-                action="Configurando tabla para mostrar todos los registros"
-            )
-            
-            self._log_state("🔧 DEPURACIÓN: Configurando tabla para mostrar todos los registros")
-            
-            # 1️⃣ Buscar el select de cantidad de entradas
-            length_select = self.page.locator(self.selectors['tabla_length_select'])
-            
-            if await length_select.count() == 0:
-                self._log_state("❌ No se encontró el select de cantidad de entradas", "error")
-                return False
-            
-            self._log_state("✅ Select de cantidad encontrado")
-            
-            # 2️⃣ Tomar screenshot antes del clic
-            await self.page.screenshot(path="debug_before_select_click.png")
-            
-            # 3️⃣ Hacer clic en el select para abrirlo
-            await length_select.click()
-            self._log_state("🔧 Select clickeado, esperando...")
-            await asyncio.sleep(1)  # Aumentar pausa
-            
-            # 4️⃣ Tomar screenshot después del clic para ver las opciones
-            await self.page.screenshot(path="debug_after_select_click.png")
-            
-            # 5️⃣ DEPURACIÓN: Listar todas las opciones disponibles
-            all_options = self.page.locator("option")
-            total_options = await all_options.count()
-            self._log_state(f"🔍 DEPURACIÓN: Total de opciones encontradas: {total_options}")
-            
-            for i in range(total_options):
-                try:
-                    option = all_options.nth(i)
-                    value = await option.get_attribute("value")
-                    text = await option.text_content()
-                    self._log_state(f"🔍 Opción {i}: value='{value}', text='{text}'")
-                except Exception as e:
-                    self._log_state(f"🔍 Error leyendo opción {i}: {e}")
-            
-            # 6️⃣ Buscar la opción "Todos" con múltiples selectores
-            selectores_todos = [
-                "option[value='-1']",                           # Selector original
-                "option[value='-1'][contains(.,'Todos')]",      # Selector del usuario
-                "option:has-text('Todos')",                     # Por texto
-                "option:has-text('todos')",                     # Minúsculas
-                "option:has-text('All')",                       # En inglés
-                "option[value='all']",                          # Otro valor posible
-                "option[value='0']",                            # Otro valor posible
-                "option[value='-1']:visible",                   # Solo visibles
-            ]
-            
-            option_todos = None
-            selector_usado = None
-            
-            for selector in selectores_todos:
-                try:
-                    temp_option = self.page.locator(selector)
-                    if await temp_option.count() > 0:
-                        option_todos = temp_option
-                        selector_usado = selector
-                        self._log_state(f"✅ Opción 'Todos' encontrada con selector: {selector}")
-                        break
-                except Exception as e:
-                    self._log_state(f"🔍 Error con selector '{selector}': {e}")
-            
-            if option_todos is None:
-                self._log_state("❌ No se encontró la opción 'Todos' con ningún selector", "error")
-                # Tomar screenshot del problema
-                await self.page.screenshot(path="debug_no_todos_option.png")
-                return False
-            
-            # 7️⃣ Verificar que la opción sea visible y clickeable
-            is_visible = await option_todos.is_visible()
-            is_enabled = await option_todos.is_enabled()
-            self._log_state(f"🔍 Opción 'Todos' - Visible: {is_visible}, Habilitada: {is_enabled}")
-            
-            if not is_visible:
-                self._log_state("⚠️ Opción 'Todos' no es visible, intentando scroll", "warning")
-                await option_todos.scroll_into_view_if_needed()
-                await asyncio.sleep(0.5)
-            
-            # 8️⃣ Hacer clic en "Todos"
-            self._log_state(f"🔧 Haciendo clic en opción 'Todos' usando selector: {selector_usado}")
-            await option_todos.click()
-            self._log_state("✅ Clic realizado en opción 'Todos'")
-            
-            # 9️⃣ Esperar a que la tabla se recargue
-            self._log_state("🔧 Esperando recarga de tabla...")
-            await self.page.wait_for_load_state('networkidle', timeout=15000)
-            await asyncio.sleep(3)  # Aumentar pausa
-            
-            # 🔟 Tomar screenshot final
-            await self.page.screenshot(path="debug_after_todos_click.png")
-            
-            # 1️⃣1️⃣ Verificar que se aplicó el cambio
-            total_info = await self._get_table_total_info()
-            self._log_state(f"📊 Tabla configurada - {total_info}")
-            
-            return True
-            
-        except Exception as e:
-            self._log_state(f"❌ Error configurando tabla: {e}", "error")
-            # Tomar screenshot del error
-            await self.page.screenshot(path="debug_configure_table_error.png")
-            return False
-    
-    async def _get_table_total_info(self) -> str:
-        """Obtiene información del total de registros de la tabla."""
-        try:
-            info_element = self.page.locator(self.selectors['tabla_info'])
-            if await info_element.count() > 0:
-                return await info_element.text_content()
-            return "Información no disponible"
-        except:
-            return "Error obteniendo información"
-    
-    async def extract_table_rows_data(self) -> List[Dict]:
-        """
-        Extrae datos de todas las filas de la tabla.
-        
-        Returns:
-            List[Dict]: Lista de diccionarios con datos de cada fila
-        """
-        try:
-            self.state.update(
-                method_name="extract_table_rows_data",
-                action="Extrayendo datos de filas de la tabla"
-            )
-            
-            self._log_state("Extrayendo datos de todas las filas")
-            
-            # Obtener todas las filas
-            filas = self.page.locator(self.selectors['filas_tabla'])
-            total_filas = await filas.count()
-            
-            self._log_state(f"Total de filas encontradas: {total_filas}")
-            
-            rows_data = []
-            
-            for i in range(total_filas):
-                try:
-                    fila = filas.nth(i)
-                    
-                    # Extraer datos de cada columna
-                    celdas = fila.locator("td")
-                    total_celdas = await celdas.count()
-                    
-                    if total_celdas >= 8:  # Verificar que tenga las columnas esperadas
-                        row_data = {
-                            'idcuenta': await celdas.nth(0).text_content(),  # ID
-                            'numero_radicacion': await celdas.nth(1).text_content(),  # Numero Radicacion
-                            'fecha_radicacion': await celdas.nth(2).text_content(),  # Fecha Radicacion
-                            'proveedor': await celdas.nth(3).text_content(),  # Proveedor
-                            'numero_factura': await celdas.nth(4).text_content(),  # Numero Factura
-                            'fecha_factura': await celdas.nth(5).text_content(),  # Fecha Factura
-                            'valor_factura': await self._parse_currency(await celdas.nth(6).text_content()),  # Valor Factura
-                            'valor_glosado': await self._parse_currency(await celdas.nth(7).text_content()),  # Valor Glosado
-                            'fila_index': i  # Índice de la fila para referencia
-                        }
-                        
-                        # Limpiar espacios en blanco
-                        for key, value in row_data.items():
-                            if isinstance(value, str):
-                                row_data[key] = value.strip()
-                        
-                        rows_data.append(row_data)
-                        
-                        self._log_state(f"Fila {i+1}: ID={row_data['idcuenta']}, Proveedor={row_data['proveedor'][:30]}...")
-                    
-                except Exception as e:
-                    self._log_state(f"Error extrayendo datos de fila {i}: {e}", "error")
-                    continue
-            
-            self._log_state(f"Extracción completada - {len(rows_data)} filas válidas")
-            return rows_data
-            
-        except Exception as e:
-            self._log_state(f"Error extrayendo datos de tabla: {e}", "error")
-            return []
-    
-    def _parse_currency(self, value: str) -> float:
-        """
-        Convierte texto de moneda a float.
-        
-        Args:
-            value (str): Valor como texto (ej: "2,666,040.00")
-            
-        Returns:
-            float: Valor numérico
-        """
-        try:
-            # Remover símbolos de moneda y espacios
-            cleaned = value.replace('$', '').replace(',', '').replace(' ', '')
-            return float(cleaned)
-        except:
-            return 0.0
-    
-    async def process_table_rows(self) -> Tuple[int, int]:
-        """
-        Procesa todas las filas de la tabla según la lógica de estados.
+        PASO 1: Extrae todos los datos y los guarda en BD
+        PASO 2: Procesa cada cuenta usando ProcesadorGlosaIndividual
         
         Returns:
             Tuple[int, int]: (filas_procesadas, filas_saltadas)
         """
         try:
             self.state.update(
-                method_name="process_table_rows",
-                action="Procesando filas de la tabla principal"
+                method_name="procesar_filas_tabla",
+                action="Procesando filas con arquitectura separada completa"
             )
             
-            self._log_state("Iniciando procesamiento de filas")
+            self.estadisticas['tiempo_inicio'] = asyncio.get_event_loop().time()
             
-            # Configurar tabla para mostrar todos
-            if not await self.configure_table_show_all():
-                self._log_state("Error configurando tabla", "error")
+            self._registrar_estado("🚀 INICIANDO PROCESAMIENTO COMPLETO CON ARQUITECTURA SEPARADA")
+            self._registrar_estado("="*80)
+            
+            # PASO 1: CONFIGURAR TABLA Y EXTRAER DATOS
+            cuentas_para_procesar = await self._paso1_extraer_y_guardar_datos()
+            
+            if not cuentas_para_procesar:
+                self._registrar_estado("⚠️ No hay cuentas para procesar", "warning")
                 return 0, 0
+            
+            self.estadisticas['total_cuentas'] = len(cuentas_para_procesar)
+            
+            # PASO 2: PROCESAR CADA CUENTA CON CLASE ESPECIALIZADA
+            filas_procesadas, filas_saltadas = await self._paso2_procesar_con_clase_individual(cuentas_para_procesar)
+            
+            self.estadisticas['tiempo_fin'] = asyncio.get_event_loop().time()
+            
+            # MOSTRAR ESTADÍSTICAS FINALES
+            await self._mostrar_estadisticas_finales()
+            
+            self._registrar_estado("="*80)
+            self._registrar_estado(f"📊 PROCESAMIENTO COMPLETO TERMINADO - Procesadas: {filas_procesadas}, Saltadas: {filas_saltadas}")
+            
+            return filas_procesadas, filas_saltadas
+            
+        except Exception as e:
+            self._registrar_estado(f"❌ Error en procesamiento completo: {e}", "error")
+            return 0, 0
+    
+    async def _paso1_extraer_y_guardar_datos(self) -> List[Dict]:
+        """
+        PASO 1: Extrae todos los datos de la tabla y los guarda en BD.
+        
+        Returns:
+            List[Dict]: Lista de cuentas que necesitan procesarse
+        """
+        try:
+            self.state.update(
+                method_name="_paso1_extraer_y_guardar_datos",
+                action="PASO 1: Extrayendo y guardando datos masivamente"
+            )
+            
+            self._registrar_estado("📋 PASO 1: EXTRACCIÓN MASIVA DE DATOS")
+            self._registrar_estado("-"*50)
+            
+            # Configurar tabla para mostrar 100
+            if not await self.configurar_tabla_mostrar_100():
+                self._registrar_estado("❌ Error configurando tabla", "error")
+                return []
+            
+            # Guardar URL actual para poder regresar
+            self.url_tabla_base = self.page.url
+            self._registrar_estado(f"💾 URL base guardada: {self.url_tabla_base}")
             
             # Extraer datos de todas las filas
-            rows_data = await self.extract_table_rows_data()
+            todos_los_datos = await self.extraer_datos_filas_tabla()
             
-            if not rows_data:
-                self._log_state("No se encontraron filas para procesar", "warning")
-                return 0, 0
+            if not todos_los_datos:
+                self._registrar_estado("❌ No se extrajeron datos de la tabla", "error")
+                return []
+            
+            # Procesar datos y guardar en BD
+            cuentas_para_procesar = []
+            cuentas_saltadas = 0
+            
+            self._registrar_estado(f"💾 Guardando {len(todos_los_datos)} cuentas en base de datos...")
+            
+            for i, datos_fila in enumerate(todos_los_datos):
+                idcuenta = datos_fila['idcuenta']
+                
+                try:
+                    # Verificar si debe procesarse esta cuenta
+                    if self.db_manager.should_process_cuenta(idcuenta):
+                        # Crear/actualizar registro en BD
+                        cuenta_id = self.db_manager.create_or_update_cuenta(datos_fila)
+                        
+                        # Agregar a lista de procesamiento
+                        datos_fila['cuenta_bd_id'] = cuenta_id
+                        cuentas_para_procesar.append(datos_fila)
+                        
+                        if i % 10 == 0 or i < 5:  # Log cada 10 cuentas o las primeras 5
+                            self._registrar_estado(f"💾 Cuenta {idcuenta} guardada en BD - ID: {cuenta_id}")
+                    else:
+                        cuentas_saltadas += 1
+                        if cuentas_saltadas <= 5:  # Log solo las primeras 5 saltadas
+                            self._registrar_estado(f"⏭️ Cuenta {idcuenta} saltada por estado")
+                except Exception as e:
+                    self._registrar_estado(f"❌ Error procesando cuenta {idcuenta}: {e}", "error")
+                    continue
+            
+            self._registrar_estado("-"*50)
+            self._registrar_estado(f"📊 PASO 1 COMPLETADO:")
+            self._registrar_estado(f"   • Total extraídas: {len(todos_los_datos)}")
+            self._registrar_estado(f"   • Para procesar: {len(cuentas_para_procesar)}")
+            self._registrar_estado(f"   • Saltadas: {cuentas_saltadas}")
+            self._registrar_estado("-"*50)
+            
+            return cuentas_para_procesar
+            
+        except Exception as e:
+            self._registrar_estado(f"❌ Error en PASO 1: {e}", "error")
+            return []
+    
+    async def _paso2_procesar_con_clase_individual(self, cuentas_para_procesar: List[Dict]) -> Tuple[int, int]:
+        """
+        PASO 2: Procesa cada cuenta usando la clase ProcesadorGlosaIndividual.
+        
+        Args:
+            cuentas_para_procesar (List[Dict]): Lista de cuentas a procesar
+            
+        Returns:
+            Tuple[int, int]: (filas_procesadas, filas_saltadas)
+        """
+        try:
+            self.state.update(
+                method_name="_paso2_procesar_con_clase_individual",
+                action="PASO 2: Procesamiento individual con clase especializada"
+            )
+            
+            self._registrar_estado("🔄 PASO 2: PROCESAMIENTO INDIVIDUAL")
+            self._registrar_estado("-"*50)
+            self._registrar_estado(f"🎯 Procesando {len(cuentas_para_procesar)} cuentas con ProcesadorGlosaIndividual")
+            self._registrar_estado("-"*50)
             
             filas_procesadas = 0
             filas_saltadas = 0
             
-            # Procesar cada fila
-            for row_data in rows_data:
-                idcuenta = row_data['idcuenta']
+            for i, datos_cuenta in enumerate(cuentas_para_procesar):
+                idcuenta = datos_cuenta['idcuenta']
+                indice_fila = datos_cuenta['indice_fila']
                 
-                # Verificar si debe procesarse esta cuenta
-                if self.db_manager.should_process_cuenta(idcuenta):
-                    # Crear/actualizar registro en BD
-                    cuenta_id = self.db_manager.create_or_update_cuenta(row_data)
+                # Header de procesamiento de cuenta
+                self._registrar_estado("")
+                self._registrar_estado(f"🎯 PROCESANDO CUENTA {i+1}/{len(cuentas_para_procesar)}")
+                self._registrar_estado(f"   ID: {idcuenta}")
+                self._registrar_estado(f"   Proveedor: {datos_cuenta.get('proveedor', 'N/A')}")
+                self._registrar_estado(f"   Valor Glosado: ${datos_cuenta.get('valor_glosado', 0):,.2f}")
+                
+                try:
+                    # SUBPASO 2.1: Asegurar que estamos en la tabla
+                    if not await self._asegurar_en_tabla():
+                        self._registrar_estado(f"❌ No se pudo regresar a la tabla para cuenta {idcuenta}", "error")
+                        self._marcar_cuenta_fallida(idcuenta, "No se pudo regresar a tabla")
+                        filas_saltadas += 1
+                        self.estadisticas['procesadas_fallidas'] += 1
+                        continue
                     
-                    # Hacer clic en el botón de la fila
-                    if await self._click_row_button(row_data['fila_index']):
-                        self._log_state(f"Cuenta {idcuenta} procesada - ID BD: {cuenta_id}")
+                    # SUBPASO 2.2: Hacer clic en el botón para ir a la pantalla individual
+                    self._registrar_estado(f"   🖱️ Haciendo clic en botón de fila {indice_fila}...")
+                    if not await self._hacer_clic_boton_fila_individual(indice_fila, idcuenta):
+                        self._registrar_estado(f"❌ No se pudo hacer clic para cuenta {idcuenta}", "error")
+                        self._marcar_cuenta_fallida(idcuenta, "Error haciendo clic en botón")
+                        filas_saltadas += 1
+                        self.estadisticas['procesadas_fallidas'] += 1
+                        continue
+                    
+                    # SUBPASO 2.3: PROCESAR CON CLASE ESPECIALIZADA
+                    self._registrar_estado(f"   🔍 Delegando a ProcesadorGlosaIndividual...")
+                    
+                    resultado_procesamiento = await self.procesador_individual.procesar_glosa_completa(
+                        idcuenta=idcuenta,
+                        datos_cuenta=datos_cuenta
+                    )
+                    
+                    # SUBPASO 2.4: Evaluar resultado
+                    if resultado_procesamiento['exito']:
+                        glosas_proc = resultado_procesamiento.get('glosas_procesadas', 0)
+                        tiempo_proc = resultado_procesamiento.get('tiempo_procesamiento', 0)
+                        
+                        self._registrar_estado(f"   ✅ CUENTA PROCESADA EXITOSAMENTE")
+                        self._registrar_estado(f"      • Glosas procesadas: {glosas_proc}")
+                        self._registrar_estado(f"      • Tiempo: {tiempo_proc:.2f}s")
+                        
                         filas_procesadas += 1
-                        
-                        # AQUÍ se continuará con el procesamiento de glosas específicas
-                        # Por ahora retornamos para continuar con la siguiente fila
-                        
+                        self.estadisticas['procesadas_exitosas'] += 1
                     else:
-                        # Error haciendo clic, marcar como fallido
-                        self.db_manager.update_cuenta_estado(
-                            idcuenta, 
-                            EstadoCuenta.FALLIDO, 
-                            "Error haciendo clic en botón"
-                        )
-                        self._log_state(f"Error procesando cuenta {idcuenta}", "error")
-                
-                else:
-                    # Saltar esta cuenta
-                    self._log_state(f"Cuenta {idcuenta} saltada por estado")
+                        error_msg = resultado_procesamiento.get('error', 'Error desconocido')
+                        self._registrar_estado(f"   ❌ ERROR EN PROCESAMIENTO INDIVIDUAL")
+                        self._registrar_estado(f"      • Error: {error_msg[:100]}")
+                        
+                        filas_saltadas += 1
+                        self.estadisticas['procesadas_fallidas'] += 1
+                    
+                except Exception as e:
+                    self._registrar_estado(f"   ❌ ERROR GENERAL procesando cuenta {idcuenta}: {e}", "error")
+                    self._marcar_cuenta_fallida(idcuenta, f"Error general: {e}")
                     filas_saltadas += 1
+                    self.estadisticas['procesadas_fallidas'] += 1
+                
+                # Pausa entre procesamiento
+                await asyncio.sleep(1)
+                
+                # Log de progreso cada 5 cuentas
+                if (i + 1) % 5 == 0:
+                    porcentaje = ((i + 1) / len(cuentas_para_procesar)) * 100
+                    self._registrar_estado("")
+                    self._registrar_estado(f"📊 PROGRESO: {i+1}/{len(cuentas_para_procesar)} ({porcentaje:.1f}%)")
+                    self._registrar_estado(f"   • Exitosas: {filas_procesadas}")
+                    self._registrar_estado(f"   • Fallidas: {filas_saltadas}")
+                    self._registrar_estado("")
             
-            self._log_state(f"Procesamiento completado - Procesadas: {filas_procesadas}, Saltadas: {filas_saltadas}")
+            self._registrar_estado("-"*50)
+            self._registrar_estado(f"📊 PASO 2 COMPLETADO:")
+            self._registrar_estado(f"   • Procesadas exitosamente: {filas_procesadas}")
+            self._registrar_estado(f"   • Fallidas/Saltadas: {filas_saltadas}")
+            self._registrar_estado("-"*50)
+            
             return filas_procesadas, filas_saltadas
             
         except Exception as e:
-            self._log_state(f"Error en procesamiento de filas: {e}", "error")
+            self._registrar_estado(f"❌ Error en PASO 2: {e}", "error")
             return 0, 0
     
-    async def _click_row_button(self, fila_index: int) -> bool:
+    async def _mostrar_estadisticas_finales(self):
+        """Muestra estadísticas detalladas del procesamiento."""
+        try:
+            tiempo_total = self.estadisticas['tiempo_fin'] - self.estadisticas['tiempo_inicio']
+            
+            self._registrar_estado("")
+            self._registrar_estado("📊 ESTADÍSTICAS FINALES")
+            self._registrar_estado("="*80)
+            self._registrar_estado(f"⏱️  TIEMPO TOTAL: {tiempo_total:.2f} segundos")
+            self._registrar_estado(f"📋 CUENTAS TOTALES: {self.estadisticas['total_cuentas']}")
+            self._registrar_estado(f"✅ PROCESADAS EXITOSAS: {self.estadisticas['procesadas_exitosas']}")
+            self._registrar_estado(f"❌ PROCESADAS FALLIDAS: {self.estadisticas['procesadas_fallidas']}")
+            self._registrar_estado(f"⏭️  SALTADAS: {self.estadisticas['saltadas']}")
+            
+            if self.estadisticas['total_cuentas'] > 0:
+                tasa_exito = (self.estadisticas['procesadas_exitosas'] / self.estadisticas['total_cuentas']) * 100
+                self._registrar_estado(f"📈 TASA DE ÉXITO: {tasa_exito:.1f}%")
+                
+                if self.estadisticas['procesadas_exitosas'] > 0:
+                    tiempo_promedio = tiempo_total / self.estadisticas['procesadas_exitosas']
+                    self._registrar_estado(f"⚡ TIEMPO PROMEDIO POR CUENTA: {tiempo_promedio:.2f}s")
+            
+            self._registrar_estado("="*80)
+            
+        except Exception as e:
+            self._registrar_estado(f"❌ Error mostrando estadísticas: {e}", "error")
+    
+    async def _asegurar_en_tabla(self) -> bool:
         """
-        Hace clic en el botón "Iniciar Respuesta Glosa" de una fila específica.
+        Se asegura de que estamos en la página de la tabla.
+        Si no, navega de vuelta.
+        
+        Returns:
+            bool: True si estamos en la tabla
+        """
+        try:
+            # Verificar si estamos en la URL de la tabla
+            url_actual = self.page.url
+            
+            # Si estamos en una URL de procesamiento de glosa, regresar
+            if "respuestaGlosastart" in url_actual or url_actual != self.url_tabla_base:
+                self._registrar_estado("🔄 No estamos en la tabla, regresando...")
+                
+                # Navegar de vuelta a la tabla
+                await self.page.goto(self.url_tabla_base)
+                await self.page.wait_for_load_state('networkidle', timeout=15000)
+                await asyncio.sleep(2)
+                
+                # Verificar que la tabla esté presente
+                tabla_presente = await self.page.locator(self.selectores['filas_tabla']).count() > 0
+                
+                if tabla_presente:
+                    self._registrar_estado("✅ Regresado a la tabla exitosamente")
+                    return True
+                else:
+                    self._registrar_estado("❌ Error: tabla no encontrada después de regresar", "error")
+                    return False
+            
+            # Ya estamos en la tabla
+            return True
+            
+        except Exception as e:
+            self._registrar_estado(f"❌ Error asegurando estar en tabla: {e}", "error")
+            return False
+    
+    async def _hacer_clic_boton_fila_individual(self, indice_fila: int, idcuenta: str) -> bool:
+        """
+        Hace clic en el botón de una fila específica para ir a procesamiento individual.
         
         Args:
-            fila_index (int): Índice de la fila
+            indice_fila (int): Índice de la fila
+            idcuenta (str): ID de la cuenta para logs
             
         Returns:
             bool: True si se hizo clic correctamente
         """
         try:
-            self._log_state(f"Haciendo clic en botón de fila {fila_index}")
+            # Verificar que la página esté activa
+            if not await self._verificar_pagina_activa():
+                self._registrar_estado(f"❌ Página no activa para cuenta {idcuenta}", "error")
+                return False
             
             # Obtener la fila específica
-            fila = self.page.locator(self.selectors['filas_tabla']).nth(fila_index)
+            fila = self.page.locator(self.selectores['filas_tabla']).nth(indice_fila)
+            
+            # Verificar que la fila existe
+            if await fila.count() == 0:
+                self._registrar_estado(f"❌ Fila {indice_fila} no encontrada para cuenta {idcuenta}", "error")
+                return False
             
             # Buscar el botón dentro de la fila
-            boton = fila.locator(self.selectors['boton_iniciar'])
+            boton = fila.locator(self.selectores['boton_iniciar'])
             
             if await boton.count() == 0:
-                self._log_state(f"No se encontró botón en fila {fila_index}", "error")
+                self._registrar_estado(f"❌ Botón no encontrado en fila {indice_fila} para cuenta {idcuenta}", "error")
                 return False
             
             # Hacer scroll al botón si es necesario
             await boton.scroll_into_view_if_needed()
             await asyncio.sleep(0.5)
             
-            # Hacer clic
-            await boton.click()
-            self._log_state(f"Clic realizado en botón de fila {fila_index}")
+            # Hacer clic con timeout
+            await boton.click(timeout=5000)
+            self._registrar_estado(f"✅ Clic realizado en botón para cuenta {idcuenta}")
             
             # Esperar a que cargue la nueva página
             await self.page.wait_for_load_state('networkidle', timeout=15000)
@@ -368,5 +423,173 @@ class GlosasTableProcessor:
             return True
             
         except Exception as e:
-            self._log_state(f"Error haciendo clic en fila {fila_index}: {e}", "error")
+            self._registrar_estado(f"❌ Error haciendo clic para cuenta {idcuenta}: {e}", "error")
             return False
+    
+    def _marcar_cuenta_fallida(self, idcuenta: str, motivo: str):
+        """Marca una cuenta como fallida en la BD."""
+        try:
+            self.db_manager.update_cuenta_estado(
+                idcuenta, 
+                EstadoCuenta.FALLIDO, 
+                motivo
+            )
+        except Exception as e:
+            self._registrar_estado(f"❌ Error marcando cuenta {idcuenta} como fallida: {e}", "error")
+    
+    # ========== MÉTODOS AUXILIARES ==========
+    
+    async def configurar_tabla_mostrar_100(self) -> bool:
+        """Configura la tabla para mostrar 100 registros."""
+        try:
+            self.state.update(
+                method_name="configurar_tabla_mostrar_100",
+                action="Configurando tabla para mostrar 100 registros"
+            )
+            
+            self._registrar_estado("🔧 Configurando tabla para mostrar 100 registros")
+            
+            # JavaScript directo (método más confiable)
+            resultado_js = await self.page.evaluate("""
+                () => {
+                    const select = document.querySelector('select[name="tablaRespuestaGlosa_length"]');
+                    if (!select) {
+                        return { success: false, error: 'Select no encontrado' };
+                    }
+                    
+                    const option100 = select.querySelector('option[value="100"]');
+                    if (!option100) {
+                        return { success: false, error: 'Opción 100 no encontrada' };
+                    }
+                    
+                    select.value = '100';
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    select.dispatchEvent(new Event('input', { bubbles: true }));
+                    
+                    return { 
+                        success: true, 
+                        valor: select.value,
+                        textoOpcion: option100.textContent 
+                    };
+                }
+            """)
+            
+            if resultado_js.get('success'):
+                self._registrar_estado(f"✅ JavaScript exitoso - Valor: {resultado_js['valor']}")
+                
+                await self.page.wait_for_load_state('networkidle', timeout=15000)
+                await asyncio.sleep(3)
+                
+                info_total = await self._obtener_info_total_tabla()
+                self._registrar_estado(f"✅ Tabla configurada - {info_total}")
+                return True
+            else:
+                self._registrar_estado(f"❌ JavaScript falló: {resultado_js.get('error')}", "error")
+                return False
+                
+        except Exception as e:
+            self._registrar_estado(f"❌ Error configurando tabla: {e}", "error")
+            return False
+    
+    async def extraer_datos_filas_tabla(self) -> List[Dict]:
+        """Extrae datos de todas las filas de la tabla."""
+        try:
+            self.state.update(
+                method_name="extraer_datos_filas_tabla",
+                action="Extrayendo datos masivos de la tabla"
+            )
+            
+            self._registrar_estado("📊 Extrayendo datos de todas las filas (máximo 100)")
+            
+            if not await self._verificar_pagina_activa():
+                self._registrar_estado("❌ Página no activa", "error")
+                return []
+            
+            filas = self.page.locator(self.selectores['filas_tabla'])
+            total_filas = await filas.count()
+            
+            self._registrar_estado(f"📈 Total de filas encontradas: {total_filas}")
+            
+            datos_filas = []
+            
+            for i in range(total_filas):
+                try:
+                    # Verificar página activa cada 25 filas
+                    if i % 25 == 0 and i > 0:
+                        if not await self._verificar_pagina_activa():
+                            self._registrar_estado(f"❌ Página cerrada en fila {i}", "error")
+                            break
+                    
+                    fila = filas.nth(i)
+                    celdas = fila.locator("td")
+                    total_celdas = await celdas.count()
+                    
+                    if total_celdas >= 8:  # Verificar columnas mínimas
+                        texto_celda_6 = await celdas.nth(6).text_content()
+                        texto_celda_7 = await celdas.nth(7).text_content()
+                        
+                        datos_fila = {
+                            'idcuenta': await celdas.nth(0).text_content(),
+                            'numero_radicacion': await celdas.nth(1).text_content(),
+                            'fecha_radicacion': await celdas.nth(2).text_content(),
+                            'proveedor': await celdas.nth(3).text_content(),
+                            'numero_factura': await celdas.nth(4).text_content(),
+                            'fecha_factura': await celdas.nth(5).text_content(),
+                            'valor_factura': self._parsear_moneda(texto_celda_6),
+                            'valor_glosado': self._parsear_moneda(texto_celda_7),
+                            'indice_fila': i
+                        }
+                        
+                        # Limpiar espacios en blanco
+                        for clave, valor in datos_fila.items():
+                            if isinstance(valor, str):
+                                datos_fila[clave] = valor.strip()
+                        
+                        datos_filas.append(datos_fila)
+                        
+                        # Log progreso cada 20 filas o las primeras 5
+                        if i % 20 == 0 or i < 5:
+                            self._registrar_estado(f"✅ Fila {i+1}: ID={datos_fila['idcuenta']}, Proveedor={datos_fila['proveedor'][:30]}...")
+                    
+                except Exception as e:
+                    self._registrar_estado(f"❌ Error extrayendo datos de fila {i}: {e}", "error")
+                    continue
+            
+            self._registrar_estado(f"📊 Extracción completada - {len(datos_filas)} filas válidas de {total_filas}")
+            return datos_filas
+            
+        except Exception as e:
+            self._registrar_estado(f"❌ Error extrayendo datos de tabla: {e}", "error")
+            return []
+    
+    def _parsear_moneda(self, valor: str) -> float:
+        """Convierte texto de moneda a float."""
+        try:
+            if not valor:
+                return 0.0
+            limpio = valor.replace('$', '').replace(',', '').replace(' ', '').strip()
+            if not limpio:
+                return 0.0
+            return float(limpio)
+        except Exception:
+            return 0.0
+    
+    async def _verificar_pagina_activa(self) -> bool:
+        """Verifica que la página de Playwright sigue activa."""
+        try:
+            if self.page.is_closed():
+                return False
+            await self.page.locator('body').count()
+            return True
+        except Exception:
+            return False
+    
+    async def _obtener_info_total_tabla(self) -> str:
+        """Obtiene información del total de registros de la tabla."""
+        try:
+            elemento_info = self.page.locator(self.selectores['info_tabla'])
+            if await elemento_info.count() > 0:
+                return await elemento_info.text_content()
+            return "Información no disponible"
+        except:
+            return "Error obteniendo información"
