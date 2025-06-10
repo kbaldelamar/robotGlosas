@@ -4,7 +4,8 @@ from typing import Optional
 from playwright.async_api import Page
 from automation.login_handler import LoginHandler
 from automation.navigation_handler import NavigationHandler, AutomationState, NavigationState
-from automation.procesador_tabla_glosas import ProcesadorTablaGlosas  # CLASE ACTUALIZADA
+# CAMBIO IMPORTANTE: Usar el procesador simplificado que vamos a crear
+from automation.procesador_tabla_glosas_simple import ProcesadorTablaGlosas
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
 from config.settings import Settings
@@ -12,23 +13,20 @@ from config.settings import Settings
 class WebScraperGlosas:
     """
     Automatizador específico para gestión de glosas.
-    VERSIÓN ACTUALIZADA CON ARQUITECTURA SEPARADA:
-    - Usa ProcesadorTablaGlosas para manejar la tabla
-    - ProcesadorTablaGlosas usa ProcesadorGlosaIndividual para cada glosa
-    - Arquitectura modular y mantenible
+    VERSIÓN SIMPLIFICADA QUE FUNCIONA SIN DEPENDENCIAS COMPLEJAS
     """
     
     def __init__(self):
-        """Inicializa el web scraper de glosas con arquitectura actualizada."""
+        """Inicializa el web scraper de glosas."""
         self.logger = logging.getLogger(__name__)
         self.login_handler = LoginHandler()
         self.navigation_handler: Optional[NavigationHandler] = None
-        self.procesador_tabla: Optional[ProcesadorTablaGlosas] = None  # CAMBIO: Nombre más claro
+        self.procesador_tabla: Optional[ProcesadorTablaGlosas] = None
         self.page: Optional[Page] = None
         
         # Base de datos específica para glosas
         self.db_manager = DatabaseManagerGlosas()
-        self.db_manager.create_glosas_tables()  # Crear tablas si no existen
+        self.db_manager.create_glosas_tables()
         
         # Estado compartido de la automatización
         self.automation_state = AutomationState(
@@ -45,7 +43,7 @@ class WebScraperGlosas:
             'tiempo_total': 0
         }
         
-        self._log_state("WebScraperGlosas inicializado con arquitectura separada")
+        self._log_state("WebScraperGlosas inicializado (versión simplificada)")
         
     def _log_state(self, message: str, level: str = "info"):
         """Log con información de estado actual."""
@@ -62,7 +60,6 @@ class WebScraperGlosas:
     async def start_glosas_automation(self, username: str, password: str) -> bool:
         """
         MÉTODO PRINCIPAL: Inicia la automatización completa de glosas.
-        VERSIÓN ACTUALIZADA con arquitectura separada.
         
         Args:
             username (str): Usuario para login
@@ -79,8 +76,7 @@ class WebScraperGlosas:
             
             self.estadisticas_globales['inicio_proceso'] = asyncio.get_event_loop().time()
             
-            self._log_state("🚀 === INICIANDO AUTOMATIZACIÓN COMPLETA DE GLOSAS ===")
-            self._log_state("🏗️ Arquitectura: Tabla + Procesamiento Individual Separado")
+            self._log_state("🚀 === INICIANDO AUTOMATIZACIÓN DE GLOSAS (VERSIÓN SIMPLIFICADA) ===")
             self._log_state("="*100)
             
             # ETAPA 1: LOGIN
@@ -91,8 +87,8 @@ class WebScraperGlosas:
             if not await self._etapa2_navegacion():
                 return False
             
-            # ETAPA 3: PROCESAMIENTO COMPLETO CON ARQUITECTURA SEPARADA
-            if not await self._etapa3_procesamiento_completo():
+            # ETAPA 3: PROCESAMIENTO SIMPLIFICADO
+            if not await self._etapa3_procesamiento_simplificado():
                 return False
             
             self.estadisticas_globales['fin_proceso'] = asyncio.get_event_loop().time()
@@ -101,7 +97,7 @@ class WebScraperGlosas:
                 self.estadisticas_globales['inicio_proceso']
             )
             
-            self._log_state("🎉 === AUTOMATIZACIÓN DE GLOSAS COMPLETADA EXITOSAMENTE ===")
+            self._log_state("🎉 === AUTOMATIZACIÓN DE GLOSAS COMPLETADA ===")
             await self._mostrar_resumen_final()
             
             return True
@@ -182,31 +178,29 @@ class WebScraperGlosas:
             self._log_state(f"❌ Error en ETAPA 2 (navegación): {e}", "error")
             return False
     
-    async def _etapa3_procesamiento_completo(self) -> bool:
+    async def _etapa3_procesamiento_simplificado(self) -> bool:
         """
-        ETAPA 3: Procesamiento completo usando arquitectura separada.
+        ETAPA 3: Procesamiento simplificado de la tabla.
         
         Returns:
             bool: True si se procesó correctamente
         """
         try:
             self.automation_state.update(
-                method_name="_etapa3_procesamiento_completo",
-                action="ETAPA 3: Procesamiento completo con arquitectura separada"
+                method_name="_etapa3_procesamiento_simplificado",
+                action="ETAPA 3: Procesamiento simplificado"
             )
             
-            self._log_state("⚙️ ETAPA 3: PROCESAMIENTO COMPLETO")
+            self._log_state("⚙️ ETAPA 3: PROCESAMIENTO SIMPLIFICADO")
             self._log_state("-"*50)
             self._log_state("🏗️ Inicializando ProcesadorTablaGlosas...")
             
-            # Inicializar procesador de tabla con arquitectura separada
+            # Inicializar procesador de tabla simplificado
             self.procesador_tabla = ProcesadorTablaGlosas(self.page, self.automation_state)
             
-            self._log_state("🚀 Iniciando procesamiento con arquitectura separada...")
-            self._log_state("   • ProcesadorTablaGlosas: Maneja tabla y navegación")
-            self._log_state("   • ProcesadorGlosaIndividual: Maneja cada glosa específica")
+            self._log_state("🚀 Iniciando procesamiento simplificado...")
             
-            # Procesar todas las filas con la nueva arquitectura
+            # Procesar todas las filas
             procesadas, saltadas = await self.procesador_tabla.procesar_filas_tabla()
             
             # Actualizar estadísticas globales
@@ -240,7 +234,7 @@ class WebScraperGlosas:
             
             self._log_state("🔍 INSPECCIÓN FINAL")
             self._log_state("-"*50)
-            self._log_state("🌐 Navegador abierto para inspección - Se cerrará en 60 segundos")
+            self._log_state("🌐 Navegador abierto para inspección - Se cerrará en 30 segundos")
             
             # Obtener estado final
             if self.navigation_handler:
@@ -250,8 +244,8 @@ class WebScraperGlosas:
             # Mostrar estadísticas finales de BD
             await self._mostrar_estadisticas_bd()
             
-            self._log_state("⏳ Manteniendo navegador abierto por 60 segundos...")
-            await asyncio.sleep(60)
+            self._log_state("⏳ Manteniendo navegador abierto por 30 segundos...")
+            await asyncio.sleep(30)  # Reducido a 30 segundos para pruebas
             
             self._log_state("🔒 Cerrando navegador...")
             await self.login_handler.logout()
@@ -270,34 +264,20 @@ class WebScraperGlosas:
             self._log_state("")
             self._log_state("🎯 RESUMEN FINAL DE AUTOMATIZACIÓN")
             self._log_state("="*100)
-            self._log_state(f"⏱️  TIEMPO TOTAL DE EJECUCIÓN: {tiempo_total:.2f} segundos ({tiempo_total/60:.1f} minutos)")
-            self._log_state(f"📊 CUENTAS TOTALES PROCESADAS: {total}")
+            self._log_state(f"⏱️  TIEMPO TOTAL: {tiempo_total:.2f} segundos ({tiempo_total/60:.1f} minutos)")
+            self._log_state(f"📊 CUENTAS TOTALES: {total}")
             self._log_state(f"✅ CUENTAS EXITOSAS: {procesadas}")
             self._log_state(f"❌ CUENTAS FALLIDAS: {fallidas}")
             
             if total > 0:
                 tasa_exito = (procesadas / total) * 100
-                self._log_state(f"📈 TASA DE ÉXITO GLOBAL: {tasa_exito:.1f}%")
+                self._log_state(f"📈 TASA DE ÉXITO: {tasa_exito:.1f}%")
                 
                 if procesadas > 0:
                     tiempo_promedio = tiempo_total / procesadas
-                    self._log_state(f"⚡ TIEMPO PROMEDIO POR CUENTA: {tiempo_promedio:.2f} segundos")
-                    
-                    velocidad = procesadas / (tiempo_total / 3600)  # cuentas por hora
-                    self._log_state(f"🚀 VELOCIDAD DE PROCESAMIENTO: {velocidad:.1f} cuentas/hora")
+                    self._log_state(f"⚡ TIEMPO PROMEDIO POR CUENTA: {tiempo_promedio:.2f}s")
             
             self._log_state("="*100)
-            
-            # Determinar resultado final
-            if procesadas > 0:
-                if tasa_exito >= 80:
-                    self._log_state("🎉 RESULTADO: AUTOMATIZACIÓN EXITOSA")
-                elif tasa_exito >= 50:
-                    self._log_state("⚠️ RESULTADO: AUTOMATIZACIÓN PARCIALMENTE EXITOSA")
-                else:
-                    self._log_state("❌ RESULTADO: AUTOMATIZACIÓN CON PROBLEMAS")
-            else:
-                self._log_state("❌ RESULTADO: AUTOMATIZACIÓN FALLIDA")
             
         except Exception as e:
             self._log_state(f"❌ Error mostrando resumen final: {e}", "error")
@@ -314,7 +294,6 @@ class WebScraperGlosas:
             self._log_state(f"⚙️ Cuentas EN_PROCESO: {stats['en_proceso']}")
             self._log_state(f"✅ Cuentas COMPLETADAS: {stats['completadas']}")
             self._log_state(f"❌ Cuentas FALLIDAS: {stats['fallidas']}")
-            self._log_state(f"🔍 Total de glosas procesadas: {stats['glosas_procesadas']}")
             self._log_state("-"*50)
             
         except Exception as e:
@@ -324,7 +303,6 @@ class WebScraperGlosas:
         """Obtiene estadísticas del procesamiento desde la BD."""
         try:
             with self.db_manager.get_connection() as conn:
-                # Estadísticas de cuentas por estado
                 cursor = conn.execute("""
                     SELECT estado, COUNT(*) as count 
                     FROM cuenta_glosas_principal 
@@ -335,8 +313,7 @@ class WebScraperGlosas:
                     'pendientes': 0,
                     'en_proceso': 0,
                     'completadas': 0,
-                    'fallidas': 0,
-                    'glosas_procesadas': 0
+                    'fallidas': 0
                 }
                 
                 for row in cursor.fetchall():
@@ -352,21 +329,6 @@ class WebScraperGlosas:
                     elif estado == 'fallido':
                         stats['fallidas'] = count
                 
-                # Total de glosas procesadas (si tienes tabla de detalles)
-                try:
-                    cursor = conn.execute("""
-                        SELECT COUNT(*) as count 
-                        FROM glosa_items_detalle 
-                        WHERE fue_procesado = 1
-                    """)
-                    
-                    row = cursor.fetchone()
-                    if row:
-                        stats['glosas_procesadas'] = row['count']
-                except:
-                    # Si no existe la tabla de detalles, usar 0
-                    stats['glosas_procesadas'] = 0
-                
                 return stats
                 
         except Exception as e:
@@ -375,6 +337,5 @@ class WebScraperGlosas:
                 'pendientes': 0,
                 'en_proceso': 0,
                 'completadas': 0,
-                'fallidas': 0,
-                'glosas_procesadas': 0
+                'fallidas': 0
             }
