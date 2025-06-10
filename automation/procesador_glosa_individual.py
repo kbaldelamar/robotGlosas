@@ -6,46 +6,44 @@ from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
 from automation.navigation_handler import AutomationState, NavigationState
 
-class ProcesadorGlosaIndividual:
+class ProcesadorGlosaIndividualMejorado:
     """
-    Procesador para manejar la pantalla individual de procesamiento de glosas.
-    Se encarga de procesar toda la información específica de una cuenta individual.
+    Procesador mejorado que integra con la BD de configuración de respuestas.
+    MEJORAS PRINCIPALES:
+    1. Usa tabla glosas_respuestas_config para respuestas automáticas
+    2. Selectores específicos para CTA Médicas
+    3. Lógica de procesamiento más inteligente
     """
     
     def __init__(self, page: Page, automation_state: AutomationState, db_manager: DatabaseManagerGlosas):
-        """
-        Inicializa el procesador de glosa individual.
-        
-        Args:
-            page (Page): Página de Playwright
-            automation_state (AutomationState): Estado compartido de automatización
-            db_manager (DatabaseManagerGlosas): Manager de base de datos compartido
-        """
         self.page = page
         self.state = automation_state
         self.logger = logging.getLogger(__name__)
         self.db_manager = db_manager
         
-        # Selectores específicos de la pantalla de glosa individual
-        # PERSONALIZAR ESTOS SELECTORES SEGÚN TU APLICACIÓN
+        # SELECTORES ESPECÍFICOS PARA CTA MÉDICAS (ACTUALIZAR SEGÚN TU APP)
         self.selectores_glosa = {
-            'tabla_glosas': "#tablaGlosas tbody tr, .tabla-glosas tbody tr, table tbody tr",
-            'campo_respuesta': ".respuesta-textarea, #respuesta, .campo-respuesta",
-            'boton_guardar': ".btn-guardar-respuesta, .btn-guardar, .guardar",
-            'boton_finalizar': ".btn-finalizar, .btn-finish, .finalizar",
-            'mensaje_exito': ".alert-success, .success-message, .mensaje-exito",
-            'mensaje_error': ".alert-danger, .error-message, .mensaje-error",
-            'info_cuenta': ".info-cuenta, .cuenta-info, .datos-cuenta",
-            'estado_glosa': ".estado-glosa, .status-glosa",
-            'formulario_respuesta': ".form-respuesta, form, .formulario-glosa"
+            # Selectores reales que debes identificar en tu aplicación
+            'tabla_glosas_detalle': "#tablaDetalleGlosas tbody tr",  # Tabla de glosas específicas
+            'campo_respuesta_textarea': "textarea[name='respuesta']",  # Campo de respuesta principal
+            'campo_observaciones': "input[name='observaciones']",     # Campo de observaciones
+            'boton_guardar_respuesta': ".btn-guardar-respuesta",     # Botón para guardar
+            'boton_subir_archivo': "input[type='file']",             # Para subir PDFs
+            'select_tipo_respuesta': "select[name='tipoRespuesta']", # Dropdown de tipo
+            'mensaje_exito': ".alert-success",                       # Mensaje de éxito
+            'info_cuenta_header': ".info-cuenta-header",            # Header con info de cuenta
+            'tabla_items_glosa': ".tabla-items-glosa tr"            # Items específicos de glosa
         }
         
+        # Cache de configuraciones de respuesta automática
+        self.config_respuestas = None
+        
         self.state.update(
-            class_name="ProcesadorGlosaIndividual",
+            class_name="ProcesadorGlosaIndividualMejorado",
             method_name="__init__"
         )
         
-        self._registrar_estado("ProcesadorGlosaIndividual inicializado")
+        self._registrar_estado("ProcesadorGlosaIndividualMejorado inicializado con integración BD")
     
     def _registrar_estado(self, mensaje: str, nivel: str = "info"):
         """Log con información de estado actual."""
@@ -61,41 +59,31 @@ class ProcesadorGlosaIndividual:
     
     async def procesar_glosa_completa(self, idcuenta: str, datos_cuenta: Dict) -> Dict:
         """
-        MÉTODO PRINCIPAL: Procesa completamente una glosa individual.
-        
-        Args:
-            idcuenta (str): ID de la cuenta a procesar
-            datos_cuenta (Dict): Datos adicionales de la cuenta
-            
-        Returns:
-            Dict: Resultado del procesamiento con estado y detalles
+        MÉTODO PRINCIPAL MEJORADO: Procesa completamente una glosa individual.
+        INTEGRADO CON BD DE CONFIGURACIÓN.
         """
         try:
             self.state.update(
                 method_name="procesar_glosa_completa",
-                action=f"Procesando glosa individual para cuenta {idcuenta}"
+                action=f"Procesando glosa individual MEJORADA para cuenta {idcuenta}"
             )
             
-            self._registrar_estado(f"🔍 INICIANDO PROCESAMIENTO DE GLOSA INDIVIDUAL - Cuenta: {idcuenta}")
+            self._registrar_estado(f"🔍 INICIANDO PROCESAMIENTO MEJORADO - Cuenta: {idcuenta}")
             
-            # Actualizar estado en BD
-            self.db_manager.update_cuenta_estado(
-                idcuenta, 
-                EstadoCuenta.EN_PROCESO, 
-                "Iniciando procesamiento de glosa individual"
-            )
+            # PASO 0: Cargar configuraciones de respuesta automática
+            await self._cargar_configuraciones_respuesta()
             
-            # PASO 1: Verificar que estamos en la página correcta
+            # PASO 1: Verificar pantalla 
             if not await self._verificar_pantalla_glosa_individual(idcuenta):
                 return self._crear_resultado_error(idcuenta, "No se pudo acceder a la pantalla de glosa")
             
-            # PASO 2: Extraer información de la pantalla
-            info_glosa = await self._extraer_informacion_glosa(idcuenta)
+            # PASO 2: Extraer información detallada
+            info_glosa = await self._extraer_informacion_glosa_detallada(idcuenta)
             if not info_glosa['exito']:
                 return self._crear_resultado_error(idcuenta, "Error extrayendo información de glosa")
             
-            # PASO 3: Procesar las glosas específicas
-            resultado_procesamiento = await self._procesar_glosas_especificas(idcuenta, info_glosa['datos'])
+            # PASO 3: Procesar con lógica inteligente basada en BD
+            resultado_procesamiento = await self._procesar_con_logica_bd(idcuenta, info_glosa['datos'])
             if not resultado_procesamiento['exito']:
                 return self._crear_resultado_error(idcuenta, f"Error en procesamiento: {resultado_procesamiento['error']}")
             
@@ -103,117 +91,87 @@ class ProcesadorGlosaIndividual:
             if not await self._finalizar_procesamiento_glosa(idcuenta):
                 return self._crear_resultado_error(idcuenta, "Error finalizando procesamiento")
             
-            # PASO 5: Actualizar estado final en BD
+            # PASO 5: Actualizar estado en BD con estadísticas
             self.db_manager.update_cuenta_estado(
                 idcuenta, 
                 EstadoCuenta.COMPLETADO, 
-                f"Glosa procesada exitosamente - {resultado_procesamiento.get('glosas_procesadas', 0)} glosas"
+                f"Procesada con lógica BD - {resultado_procesamiento.get('glosas_procesadas', 0)} glosas",
+                glosas_stats=resultado_procesamiento.get('estadisticas', {})
             )
             
-            self._registrar_estado(f"✅ GLOSA INDIVIDUAL COMPLETADA - Cuenta: {idcuenta}")
+            self._registrar_estado(f"✅ GLOSA MEJORADA COMPLETADA - Cuenta: {idcuenta}")
             
             return {
                 'exito': True,
                 'idcuenta': idcuenta,
-                'mensaje': 'Glosa procesada exitosamente',
+                'mensaje': 'Glosa procesada con lógica de BD',
                 'glosas_procesadas': resultado_procesamiento.get('glosas_procesadas', 0),
-                'detalles': resultado_procesamiento.get('detalles', {}),
+                'respuestas_aplicadas': resultado_procesamiento.get('respuestas_aplicadas', []),
                 'tiempo_procesamiento': resultado_procesamiento.get('tiempo_procesamiento', 0)
             }
             
         except Exception as e:
-            error_msg = f"Error general procesando glosa {idcuenta}: {e}"
+            error_msg = f"Error general procesando glosa mejorada {idcuenta}: {e}"
             self._registrar_estado(error_msg, "error")
             return self._crear_resultado_error(idcuenta, error_msg)
     
-    async def _verificar_pantalla_glosa_individual(self, idcuenta: str) -> bool:
+    async def _cargar_configuraciones_respuesta(self):
         """
-        Verifica que estamos en la pantalla correcta de procesamiento de glosa.
-        
-        Args:
-            idcuenta (str): ID de la cuenta
-            
-        Returns:
-            bool: True si estamos en la pantalla correcta
+        NUEVA FUNCIONALIDAD: Carga configuraciones de respuesta automática desde BD.
         """
         try:
-            self._registrar_estado(f"🔍 Verificando pantalla de glosa para cuenta {idcuenta}")
+            self._registrar_estado("📋 Cargando configuraciones de respuesta automática desde BD")
             
-            # Verificar URL
-            url_actual = self.page.url
-            if "respuestaGlosastart" not in url_actual:
-                self._registrar_estado(f"❌ URL incorrecta: {url_actual}", "error")
-                return False
-            
-            # Verificar que el ID de cuenta esté en la URL (codificado en base64)
-            # Nota: El ID puede estar codificado, así que verificamos de forma más flexible
-            self._registrar_estado(f"✅ URL correcta para procesamiento de glosa: {url_actual}")
-            
-            # Esperar a que la página cargue completamente
-            await self.page.wait_for_load_state('networkidle', timeout=15000)
-            await asyncio.sleep(3)  # Tiempo adicional para JavaScript
-            
-            # Verificar elementos clave de la pantalla (flexibles)
-            elementos_verificados = 0
-            total_elementos = 0
-            
-            for selector_key, descripcion in [
-                ('formulario_respuesta', 'Formulario de respuesta'),
-                ('info_cuenta', 'Información de cuenta'),
-                ('tabla_glosas', 'Tabla de glosas')
-            ]:
-                total_elementos += 1
-                if selector_key in self.selectores_glosa:
-                    elemento = self.page.locator(self.selectores_glosa[selector_key])
-                    if await elemento.count() > 0:
-                        elementos_verificados += 1
-                        self._registrar_estado(f"✅ {descripcion} encontrado")
-                    else:
-                        self._registrar_estado(f"⚠️ {descripcion} no encontrado", "warning")
-            
-            # Si encontramos al menos la mitad de los elementos, consideramos exitoso
-            if elementos_verificados >= total_elementos // 2:
-                self._registrar_estado(f"✅ Pantalla verificada ({elementos_verificados}/{total_elementos} elementos)")
-                return True
-            else:
-                self._registrar_estado(f"❌ Pantalla no verificada ({elementos_verificados}/{total_elementos} elementos)", "error")
-                return False
-            
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT tipo, justificacion_patron, respuesta_automatica, url_pdf
+                    FROM glosas_respuestas_config 
+                    WHERE activo = 1
+                    ORDER BY tipo, justificacion_patron
+                """)
+                
+                self.config_respuestas = []
+                for row in cursor.fetchall():
+                    config = {
+                        'tipo': row['tipo'],
+                        'patron': row['justificacion_patron'],
+                        'respuesta': row['respuesta_automatica'],
+                        'url_pdf': row['url_pdf']
+                    }
+                    self.config_respuestas.append(config)
+                
+                self._registrar_estado(f"✅ Cargadas {len(self.config_respuestas)} configuraciones de respuesta")
+                
         except Exception as e:
-            self._registrar_estado(f"❌ Error verificando pantalla: {e}", "error")
-            return False
+            self._registrar_estado(f"⚠️ Error cargando configuraciones: {e}", "warning")
+            self.config_respuestas = []
     
-    async def _extraer_informacion_glosa(self, idcuenta: str) -> Dict:
+    async def _extraer_informacion_glosa_detallada(self, idcuenta: str) -> Dict:
         """
-        Extrae toda la información necesaria de la pantalla de glosa.
-        
-        Args:
-            idcuenta (str): ID de la cuenta
-            
-        Returns:
-            Dict: Información extraída con éxito/error
+        VERSIÓN MEJORADA: Extrae información más detallada y específica.
         """
         try:
-            self._registrar_estado(f"📊 Extrayendo información de glosa para cuenta {idcuenta}")
+            self._registrar_estado(f"📊 Extrayendo información detallada para cuenta {idcuenta}")
             
             datos_extraidos = {
                 'idcuenta': idcuenta,
-                'glosas': [],
+                'items_glosa': [],
                 'info_cuenta': {},
+                'campos_formulario': [],
                 'url_procesamiento': self.page.url,
                 'timestamp': asyncio.get_event_loop().time()
             }
             
-            # EXTRAER INFORMACIÓN DE LA CUENTA
-            await self._extraer_info_cuenta(datos_extraidos)
+            # EXTRAER ITEMS DE GLOSA ESPECÍFICOS
+            await self._extraer_items_glosa_especificos(datos_extraidos)
             
-            # EXTRAER GLOSAS ESPECÍFICAS
-            await self._extraer_glosas_tabla(datos_extraidos)
+            # EXTRAER INFORMACIÓN DE CUENTA
+            await self._extraer_info_cuenta_detallada(datos_extraidos)
             
-            # EXTRAER CAMPOS DE FORMULARIO
-            await self._extraer_campos_formulario(datos_extraidos)
+            # EXTRAER CAMPOS DE FORMULARIO ESPECÍFICOS
+            await self._extraer_campos_formulario_especificos(datos_extraidos)
             
-            self._registrar_estado(f"✅ Información extraída - {len(datos_extraidos['glosas'])} glosas encontradas")
+            self._registrar_estado(f"✅ Información detallada extraída - {len(datos_extraidos['items_glosa'])} items")
             
             return {
                 'exito': True,
@@ -221,461 +179,363 @@ class ProcesadorGlosaIndividual:
             }
             
         except Exception as e:
-            error_msg = f"Error general extrayendo información: {e}"
+            error_msg = f"Error extrayendo información detallada: {e}"
             self._registrar_estado(error_msg, "error")
             return {'exito': False, 'error': error_msg}
     
-    async def _extraer_info_cuenta(self, datos_extraidos: Dict):
-        """Extrae información general de la cuenta."""
+    async def _extraer_items_glosa_especificos(self, datos_extraidos: Dict):
+        """Extrae items específicos de glosa con más detalle."""
         try:
-            info_cuenta_element = self.page.locator(self.selectores_glosa.get('info_cuenta', '.info-cuenta'))
-            if await info_cuenta_element.count() > 0:
-                texto_info = await info_cuenta_element.first.text_content()
-                datos_extraidos['info_cuenta'] = {
-                    'texto': texto_info.strip() if texto_info else "",
-                    'encontrado': True
-                }
-                self._registrar_estado(f"✅ Info de cuenta extraída: {texto_info[:100]}...")
-            else:
-                datos_extraidos['info_cuenta'] = {'encontrado': False}
-                self._registrar_estado("⚠️ Info de cuenta no encontrada", "warning")
-        except Exception as e:
-            self._registrar_estado(f"⚠️ Error extrayendo info de cuenta: {e}", "warning")
-            datos_extraidos['info_cuenta'] = {'error': str(e)}
-    
-    async def _extraer_glosas_tabla(self, datos_extraidos: Dict):
-        """Extrae las glosas de la tabla."""
-        try:
-            # Intentar múltiples selectores para la tabla
-            selectores_tabla = [
-                self.selectores_glosa.get('tabla_glosas', ''),
-                'tbody tr',
-                'table tr',
-                '.table tr',
-                '#tablaGlosas tr'
-            ]
+            # Buscar tabla de items de glosa específicos
+            items_selector = self.selectores_glosa.get('tabla_items_glosa', 'tbody tr')
+            filas_items = self.page.locator(items_selector)
+            total_items = await filas_items.count()
             
-            filas_glosas = None
-            selector_usado = None
+            self._registrar_estado(f"📈 Encontrados {total_items} items de glosa")
             
-            for selector in selectores_tabla:
-                if selector:
-                    elemento = self.page.locator(selector)
-                    if await elemento.count() > 0:
-                        filas_glosas = elemento
-                        selector_usado = selector
-                        break
-            
-            if filas_glosas is None:
-                self._registrar_estado("⚠️ No se encontró tabla de glosas", "warning")
-                return
-            
-            total_glosas = await filas_glosas.count()
-            self._registrar_estado(f"📈 Encontradas {total_glosas} filas con selector: {selector_usado}")
-            
-            for i in range(min(total_glosas, 50)):  # Limitar a 50 glosas máximo
+            for i in range(min(total_items, 100)):  # Límite seguro
                 try:
-                    fila = filas_glosas.nth(i)
-                    celdas = fila.locator('td, th')
+                    fila = filas_items.nth(i)
+                    celdas = fila.locator('td')
                     total_celdas = await celdas.count()
                     
-                    if total_celdas > 0:
-                        glosa_data = {
+                    if total_celdas >= 5:  # Mínimo esperado para una glosa
+                        item_data = {
                             'indice': i,
-                            'celdas': [],
-                            'tiene_campos_input': False
+                            'id_glosa': await celdas.nth(0).text_content() or "",
+                            'descripcion': await celdas.nth(1).text_content() or "",
+                            'tipo': await celdas.nth(2).text_content() or "",
+                            'justificacion': await celdas.nth(3).text_content() or "",
+                            'valor': await celdas.nth(4).text_content() or "",
+                            'estado': await celdas.nth(5).text_content() if total_celdas > 5 else "",
+                            'tiene_campos_input': False,
+                            'campos_disponibles': []
                         }
                         
-                        # Extraer contenido de cada celda
-                        for j in range(min(total_celdas, 15)):  # Máximo 15 celdas por fila
-                            try:
-                                celda = celdas.nth(j)
-                                celda_texto = await celda.text_content()
-                                
-                                # Verificar si hay campos de input en la celda
-                                inputs = celda.locator('input, textarea, select')
-                                if await inputs.count() > 0:
-                                    glosa_data['tiene_campos_input'] = True
-                                
-                                glosa_data['celdas'].append(celda_texto.strip() if celda_texto else "")
-                                
-                            except Exception as e:
-                                glosa_data['celdas'].append("")
-                                self._registrar_estado(f"⚠️ Error en celda {j} de fila {i}: {e}", "warning")
+                        # Verificar campos de input en la fila
+                        inputs = fila.locator('input, textarea, select')
+                        if await inputs.count() > 0:
+                            item_data['tiene_campos_input'] = True
+                            
+                            # Catalogar tipos de campos disponibles
+                            for j in range(await inputs.count()):
+                                input_elem = inputs.nth(j)
+                                tipo = await input_elem.get_attribute('type') or 'text'
+                                name = await input_elem.get_attribute('name') or f'campo_{j}'
+                                item_data['campos_disponibles'].append({
+                                    'tipo': tipo,
+                                    'nombre': name,
+                                    'indice': j
+                                })
                         
-                        datos_extraidos['glosas'].append(glosa_data)
+                        # Limpiar textos
+                        for key, value in item_data.items():
+                            if isinstance(value, str):
+                                item_data[key] = value.strip()
+                        
+                        datos_extraidos['items_glosa'].append(item_data)
                         
                 except Exception as e:
-                    self._registrar_estado(f"⚠️ Error procesando fila {i}: {e}", "warning")
+                    self._registrar_estado(f"⚠️ Error procesando item {i}: {e}", "warning")
                     continue
                     
         except Exception as e:
-            self._registrar_estado(f"❌ Error extrayendo tabla de glosas: {e}", "error")
+            self._registrar_estado(f"❌ Error extrayendo items de glosa: {e}", "error")
     
-    async def _extraer_campos_formulario(self, datos_extraidos: Dict):
-        """Extrae campos de formulario disponibles."""
-        try:
-            campos_formulario = []
-            
-            # Buscar formularios
-            formularios = self.page.locator('form, .form, .formulario')
-            total_formularios = await formularios.count()
-            
-            if total_formularios > 0:
-                self._registrar_estado(f"📋 Encontrados {total_formularios} formularios")
-                
-                for i in range(total_formularios):
-                    form = formularios.nth(i)
-                    
-                    # Buscar campos de input
-                    inputs = form.locator('input, textarea, select')
-                    total_inputs = await inputs.count()
-                    
-                    for j in range(total_inputs):
-                        try:
-                            input_elem = inputs.nth(j)
-                            campo_info = {
-                                'tipo': await input_elem.get_attribute('type') or 'text',
-                                'name': await input_elem.get_attribute('name') or f'campo_{j}',
-                                'id': await input_elem.get_attribute('id') or '',
-                                'placeholder': await input_elem.get_attribute('placeholder') or '',
-                                'formulario': i
-                            }
-                            campos_formulario.append(campo_info)
-                        except Exception as e:
-                            self._registrar_estado(f"⚠️ Error extrayendo campo {j}: {e}", "warning")
-            
-            datos_extraidos['campos_formulario'] = campos_formulario
-            self._registrar_estado(f"✅ Extraídos {len(campos_formulario)} campos de formulario")
-            
-        except Exception as e:
-            self._registrar_estado(f"⚠️ Error extrayendo campos de formulario: {e}", "warning")
-            datos_extraidos['campos_formulario'] = []
-    
-    async def _procesar_glosas_especificas(self, idcuenta: str, info_glosa: Dict) -> Dict:
+    async def _procesar_con_logica_bd(self, idcuenta: str, info_glosa: Dict) -> Dict:
         """
-        Procesa las glosas específicas según la lógica de negocio.
-        
-        Args:
-            idcuenta (str): ID de la cuenta
-            info_glosa (Dict): Información extraída de la glosa
-            
-        Returns:
-            Dict: Resultado del procesamiento
+        NUEVA FUNCIONALIDAD: Procesa usando configuraciones de BD.
         """
         try:
-            self._registrar_estado(f"⚙️ Procesando glosas específicas para cuenta {idcuenta}")
+            self._registrar_estado(f"⚙️ Procesando con lógica de BD para cuenta {idcuenta}")
             
             tiempo_inicio = asyncio.get_event_loop().time()
-            glosas = info_glosa.get('glosas', [])
-            campos_formulario = info_glosa.get('campos_formulario', [])
-            glosas_procesadas = 0
+            items_glosa = info_glosa.get('items_glosa', [])
+            respuestas_aplicadas = []
+            items_procesados = 0
             errores = []
             
-            self._registrar_estado(f"📊 Iniciando procesamiento: {len(glosas)} glosas, {len(campos_formulario)} campos")
+            self._registrar_estado(f"📊 Iniciando procesamiento inteligente: {len(items_glosa)} items")
             
-            # MÉTODO 1: Procesar usando campos de formulario si están disponibles
-            if campos_formulario:
-                resultado_formulario = await self._procesar_via_formulario(idcuenta, campos_formulario, info_glosa)
-                if resultado_formulario['exito']:
-                    glosas_procesadas += resultado_formulario['procesadas']
-                else:
-                    errores.extend(resultado_formulario['errores'])
-            
-            # MÉTODO 2: Procesar glosas individuales de la tabla
-            if glosas:
-                resultado_tabla = await self._procesar_via_tabla(idcuenta, glosas)
-                if resultado_tabla['exito']:
-                    glosas_procesadas += resultado_tabla['procesadas']
-                else:
-                    errores.extend(resultado_tabla['errores'])
-            
-            # MÉTODO 3: Procesamiento genérico si los anteriores no funcionan
-            if glosas_procesadas == 0 and not errores:
-                resultado_generico = await self._procesamiento_generico(idcuenta, info_glosa)
-                if resultado_generico['exito']:
-                    glosas_procesadas += resultado_generico['procesadas']
-                else:
-                    errores.extend(resultado_generico['errores'])
+            for i, item in enumerate(items_glosa):
+                try:
+                    # BUSCAR CONFIGURACIÓN APLICABLE
+                    config_aplicable = self._buscar_configuracion_aplicable(item)
+                    
+                    if config_aplicable:
+                        # PROCESAR CON CONFIGURACIÓN ESPECÍFICA
+                        resultado = await self._procesar_item_con_configuracion(
+                            idcuenta, i, item, config_aplicable
+                        )
+                        
+                        if resultado['exito']:
+                            items_procesados += 1
+                            respuestas_aplicadas.append({
+                                'item_indice': i,
+                                'id_glosa': item.get('id_glosa', ''),
+                                'tipo_config': config_aplicable['tipo'],
+                                'respuesta': config_aplicable['respuesta'],
+                                'patron_usado': config_aplicable['patron']
+                            })
+                            
+                            # GUARDAR EN BD DETALLE
+                            self._guardar_detalle_procesamiento(idcuenta, item, config_aplicable, "PROCESADO")
+                        else:
+                            errores.append(resultado.get('error', 'Error desconocido'))
+                            self._guardar_detalle_procesamiento(idcuenta, item, config_aplicable, "ERROR", resultado.get('error'))
+                    else:
+                        # SIN CONFIGURACIÓN APLICABLE
+                        self._registrar_estado(f"⚠️ Sin configuración para item {i}: {item.get('tipo', 'N/A')} - {item.get('justificacion', 'N/A')[:50]}...")
+                        self._guardar_detalle_procesamiento(idcuenta, item, None, "SIN_CONFIG")
+                
+                except Exception as e:
+                    error_msg = f"Error procesando item {i}: {e}"
+                    errores.append(error_msg)
+                    self._registrar_estado(error_msg, "error")
+                    self._guardar_detalle_procesamiento(idcuenta, item, None, "ERROR", str(e))
             
             tiempo_fin = asyncio.get_event_loop().time()
             tiempo_total = tiempo_fin - tiempo_inicio
             
-            self._registrar_estado(f"✅ Procesamiento específico completado en {tiempo_total:.2f}s - {glosas_procesadas} glosas procesadas")
+            # ESTADÍSTICAS
+            estadisticas = {
+                'total_items': len(items_glosa),
+                'items_procesados': items_procesados,
+                'items_con_config': len(respuestas_aplicadas),
+                'items_sin_config': len(items_glosa) - len(respuestas_aplicadas) - len(errores),
+                'errores': len(errores)
+            }
+            
+            self._registrar_estado(f"✅ Procesamiento BD completado en {tiempo_total:.2f}s")
+            self._registrar_estado(f"📊 Stats: {items_procesados} procesados, {len(respuestas_aplicadas)} con config, {len(errores)} errores")
             
             return {
                 'exito': True,
-                'glosas_procesadas': glosas_procesadas,
-                'total_glosas': len(glosas),
+                'glosas_procesadas': items_procesados,
+                'respuestas_aplicadas': respuestas_aplicadas,
+                'estadisticas': estadisticas,
                 'errores': errores,
-                'tiempo_procesamiento': tiempo_total,
-                'detalles': {
-                    'glosas_exitosas': glosas_procesadas,
-                    'glosas_fallidas': len(errores),
-                    'metodo_usado': 'formulario' if campos_formulario else 'tabla' if glosas else 'generico'
-                }
+                'tiempo_procesamiento': tiempo_total
             }
             
         except Exception as e:
-            error_msg = f"Error general en procesamiento específico: {e}"
+            error_msg = f"Error general en procesamiento con BD: {e}"
             self._registrar_estado(error_msg, "error")
             return {'exito': False, 'error': error_msg}
     
-    async def _procesar_via_formulario(self, idcuenta: str, campos_formulario: List[Dict], info_glosa: Dict) -> Dict:
-        """Procesa usando campos de formulario detectados."""
+    def _buscar_configuracion_aplicable(self, item: Dict) -> Optional[Dict]:
+        """
+        NUEVA FUNCIONALIDAD: Busca configuración aplicable en BD.
+        """
         try:
-            self._registrar_estado(f"📝 Procesando vía formulario - {len(campos_formulario)} campos")
+            if not self.config_respuestas:
+                return None
             
-            procesadas = 0
-            errores = []
+            tipo_item = item.get('tipo', '').upper()
+            justificacion = item.get('justificacion', '').upper()
             
-            for i, campo in enumerate(campos_formulario):
-                try:
-                    # Buscar el campo en la página
-                    selector = f"#{campo['id']}" if campo['id'] else f"[name='{campo['name']}']"
-                    elemento = self.page.locator(selector)
+            # Buscar coincidencia exacta de tipo primero
+            for config in self.config_respuestas:
+                if config['tipo'].upper() == tipo_item:
+                    # Verificar patrón de justificación
+                    patron = config['patron'].replace('%', '').upper()
                     
-                    if await elemento.count() > 0:
-                        # Generar respuesta automática
-                        respuesta = self._generar_respuesta_automatica_campo(campo, info_glosa)
-                        
-                        # Llenar el campo
-                        await elemento.first.fill(respuesta)
-                        await asyncio.sleep(0.5)
-                        
-                        procesadas += 1
-                        self._registrar_estado(f"✅ Campo {campo['name']} procesado")
-                        
-                        # Guardar en BD
-                        self._guardar_detalle_glosa(idcuenta, i, campo, "PROCESADO")
-                        
-                except Exception as e:
-                    error_msg = f"Error procesando campo {campo.get('name', i)}: {e}"
-                    errores.append(error_msg)
-                    self._registrar_estado(error_msg, "error")
-                    self._guardar_detalle_glosa(idcuenta, i, campo, "ERROR", str(e))
+                    # Verificar si el patrón coincide (usando LIKE de SQL)
+                    if self._patron_coincide(patron, justificacion):
+                        self._registrar_estado(f"✅ Configuración encontrada: {config['tipo']} - {patron[:30]}...")
+                        return config
             
-            return {
-                'exito': True,
-                'procesadas': procesadas,
-                'errores': errores
-            }
+            # Si no hay coincidencia exacta, buscar patrones genéricos
+            for config in self.config_respuestas:
+                patron = config['patron'].replace('%', '').upper()
+                if patron in justificacion:
+                    self._registrar_estado(f"✅ Configuración genérica encontrada: {config['tipo']} - {patron[:30]}...")
+                    return config
+            
+            return None
             
         except Exception as e:
-            return {
-                'exito': False,
-                'procesadas': 0,
-                'errores': [f"Error en procesamiento via formulario: {e}"]
-            }
+            self._registrar_estado(f"⚠️ Error buscando configuración: {e}", "warning")
+            return None
     
-    async def _procesar_via_tabla(self, idcuenta: str, glosas: List[Dict]) -> Dict:
-        """Procesa usando datos de tabla de glosas."""
+    def _patron_coincide(self, patron: str, texto: str) -> bool:
+        """Verifica si un patrón coincide con el texto (simulando LIKE de SQL)."""
         try:
-            self._registrar_estado(f"📊 Procesando vía tabla - {len(glosas)} glosas")
+            # Convertir patrón SQL LIKE a verificación simple
+            # Ejemplo: "MAYOR VALOR COBRADO EN" -> buscar en texto
+            if not patron or not texto:
+                return False
             
-            procesadas = 0
-            errores = []
+            # Si el patrón contiene múltiples palabras, verificar que todas estén presentes
+            palabras_patron = patron.split()
+            for palabra in palabras_patron:
+                if len(palabra) > 2 and palabra not in texto:  # Ignorar palabras muy cortas
+                    return False
             
-            for i, glosa in enumerate(glosas):
-                try:
-                    if glosa.get('tiene_campos_input', False):
-                        # Si la fila tiene campos de input, interactuar con ellos
-                        await self._procesar_glosa_con_inputs(idcuenta, i, glosa)
-                    else:
-                        # Si es solo información, marcar como revisada
-                        await self._marcar_glosa_revisada(idcuenta, i, glosa)
-                    
-                    procesadas += 1
-                    self._guardar_detalle_glosa(idcuenta, i, glosa, "PROCESADO")
-                    
-                except Exception as e:
-                    error_msg = f"Error procesando glosa {i}: {e}"
-                    errores.append(error_msg)
-                    self._registrar_estado(error_msg, "error")
-                    self._guardar_detalle_glosa(idcuenta, i, glosa, "ERROR", str(e))
+            return True
             
-            return {
-                'exito': True,
-                'procesadas': procesadas,
-                'errores': errores
-            }
-            
-        except Exception as e:
-            return {
-                'exito': False,
-                'procesadas': 0,
-                'errores': [f"Error en procesamiento via tabla: {e}"]
-            }
+        except Exception:
+            return False
     
-    async def _procesar_glosa_con_inputs(self, idcuenta: str, indice: int, glosa: Dict):
-        """Procesa una glosa que tiene campos de input."""
+    async def _procesar_item_con_configuracion(self, idcuenta: str, indice: int, 
+                                             item: Dict, config: Dict) -> Dict:
+        """
+        NUEVA FUNCIONALIDAD: Procesa un item usando configuración específica de BD.
+        """
         try:
-            # Buscar campos en la fila específica
+            self._registrar_estado(f"⚙️ Procesando item {indice} con configuración {config['tipo']}")
+            
+            # Buscar campo de respuesta en la fila del item
             fila_selector = f"tr:nth-child({indice + 1})"
-            inputs = self.page.locator(f"{fila_selector} input, {fila_selector} textarea")
-            total_inputs = await inputs.count()
             
-            for j in range(total_inputs):
-                input_elem = inputs.nth(j)
-                tipo = await input_elem.get_attribute('type') or 'text'
+            # Intentar múltiples tipos de campos
+            campos_respuesta = [
+                f"{fila_selector} textarea",
+                f"{fila_selector} input[type='text']",
+                f"{fila_selector} input[name*='respuesta']",
+                self.selectores_glosa.get('campo_respuesta_textarea', '')
+            ]
+            
+            campo_encontrado = None
+            for selector in campos_respuesta:
+                if selector:
+                    elemento = self.page.locator(selector)
+                    if await elemento.count() > 0:
+                        campo_encontrado = elemento.first
+                        break
+            
+            if campo_encontrado:
+                # APLICAR RESPUESTA DE LA CONFIGURACIÓN
+                respuesta = config['respuesta']
+                await campo_encontrado.fill(respuesta)
+                await asyncio.sleep(0.5)
                 
-                if tipo in ['text', 'textarea']:
-                    respuesta = self._generar_respuesta_automatica(glosa)
-                    await input_elem.fill(respuesta)
-                    await asyncio.sleep(0.3)
-            
-            self._registrar_estado(f"✅ Glosa {indice} con inputs procesada")
-            
+                self._registrar_estado(f"✅ Respuesta aplicada en item {indice}: {respuesta[:50]}...")
+                
+                return {
+                    'exito': True,
+                    'respuesta_aplicada': respuesta,
+                    'campo_usado': 'encontrado'
+                }
+            else:
+                error_msg = f"No se encontró campo de respuesta para item {indice}"
+                self._registrar_estado(error_msg, "warning")
+                return {
+                    'exito': False,
+                    'error': error_msg
+                }
+                
         except Exception as e:
-            self._registrar_estado(f"❌ Error procesando glosa con inputs {indice}: {e}", "error")
-            raise
-    
-    async def _marcar_glosa_revisada(self, idcuenta: str, indice: int, glosa: Dict):
-        """Marca una glosa como revisada si no tiene campos editables."""
-        # Esto es para glosas que solo requieren revisión, no edición
-        self._registrar_estado(f"👁️ Glosa {indice} marcada como revisada")
-        await asyncio.sleep(0.1)  # Simular tiempo de revisión
-    
-    async def _procesamiento_generico(self, idcuenta: str, info_glosa: Dict) -> Dict:
-        """Procesamiento genérico cuando otros métodos no aplican."""
-        try:
-            self._registrar_estado(f"🔧 Aplicando procesamiento genérico para cuenta {idcuenta}")
-            
-            # Buscar cualquier campo de texto en la página
-            campos_texto = self.page.locator('input[type="text"], textarea')
-            total_campos = await campos_texto.count()
-            
-            procesadas = 0
-            
-            if total_campos > 0:
-                for i in range(min(total_campos, 10)):  # Máximo 10 campos
-                    try:
-                        campo = campos_texto.nth(i)
-                        if await campo.is_enabled() and await campo.is_visible():
-                            respuesta_generica = f"Respuesta automática para cuenta {idcuenta}"
-                            await campo.fill(respuesta_generica)
-                            await asyncio.sleep(0.3)
-                            procesadas += 1
-                    except Exception as e:
-                        self._registrar_estado(f"⚠️ Error en campo genérico {i}: {e}", "warning")
-            
-            return {
-                'exito': True,
-                'procesadas': procesadas,
-                'errores': []
-            }
-            
-        except Exception as e:
+            error_msg = f"Error procesando item {indice} con configuración: {e}"
+            self._registrar_estado(error_msg, "error")
             return {
                 'exito': False,
-                'procesadas': 0,
-                'errores': [f"Error en procesamiento genérico: {e}"]
+                'error': error_msg
             }
     
-    def _generar_respuesta_automatica(self, glosa: Dict) -> str:
+    def _guardar_detalle_procesamiento(self, idcuenta: str, item: Dict, 
+                                     config: Optional[Dict], estado: str, error: str = None):
         """
-        Genera una respuesta automática basada en la glosa.
-        PERSONALIZAR SEGÚN TU LÓGICA DE NEGOCIO.
+        NUEVA FUNCIONALIDAD: Guarda detalle del procesamiento en BD.
         """
         try:
-            celdas = glosa.get('celdas', [])
-            
-            # EJEMPLO DE LÓGICA - PERSONALIZAR SEGÚN TUS REGLAS
-            if len(celdas) > 0 and celdas[0]:
-                primer_texto = celdas[0].lower()
+            with self.db_manager.get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO glosas_detalles_procesadas 
+                    (idcuenta, id_glosa, id_item, descripcion_item, tipo, 
+                     justificacion, valor_glosado, estado_original,
+                     respuesta_aplicada, config_id, estado_procesamiento, 
+                     fecha_procesamiento, error_mensaje)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                """, (
+                    idcuenta,
+                    item.get('id_glosa', ''),
+                    item.get('indice', ''),
+                    item.get('descripcion', ''),
+                    item.get('tipo', ''),
+                    item.get('justificacion', ''),
+                    self._parsear_moneda(item.get('valor', '0')),
+                    item.get('estado', ''),
+                    config['respuesta'] if config else None,
+                    None,  # config_id (podrías agregar si tienes IDs de config)
+                    estado,
+                    error
+                ))
+                conn.commit()
                 
-                # Ejemplos de respuestas automáticas basadas en contenido
-                if 'medicamento' in primer_texto or 'medicina' in primer_texto:
-                    return "Medicamento dispensado según prescripción médica. Documentación adjunta."
-                elif 'procedimiento' in primer_texto or 'cirugía' in primer_texto:
-                    return "Procedimiento realizado según protocolo establecido. Historia clínica disponible."
-                elif 'consulta' in primer_texto:
-                    return "Consulta médica realizada. Registro en historia clínica."
-                elif 'examen' in primer_texto or 'laboratorio' in primer_texto:
-                    return "Examen realizado según orden médica. Resultados disponibles."
-                else:
-                    return f"Servicio prestado correctamente. Referencia: {celdas[0][:30]}..."
-            
-            return "Respuesta automática estándar - Servicio prestado según normatividad vigente."
-            
         except Exception as e:
-            self._registrar_estado(f"⚠️ Error generando respuesta automática: {e}", "warning")
-            return "Respuesta automática estándar."
+            self._registrar_estado(f"⚠️ Error guardando detalle: {e}", "warning")
     
-    def _generar_respuesta_automatica_campo(self, campo: Dict, info_glosa: Dict) -> str:
-        """Genera respuesta específica para un campo de formulario."""
+    def _parsear_moneda(self, valor: str) -> float:
+        """Convierte texto de moneda a float."""
         try:
-            nombre_campo = campo.get('name', '').lower()
-            placeholder = campo.get('placeholder', '').lower()
+            if not valor:
+                return 0.0
+            limpio = valor.replace('$', '').replace(',', '').replace('.', '').replace(' ', '').strip()
+            if not limpio:
+                return 0.0
+            return float(limpio) / 100  # Asumir últimos 2 dígitos son decimales
+        except Exception:
+            return 0.0
+    
+    async def _verificar_pantalla_glosa_individual(self, idcuenta: str) -> bool:
+        """Versión mejorada de verificación de pantalla."""
+        try:
+            self._registrar_estado(f"🔍 Verificando pantalla mejorada para cuenta {idcuenta}")
             
-            # Lógica específica por tipo de campo
-            if 'observacion' in nombre_campo or 'observacion' in placeholder:
-                return "Observaciones: Servicio prestado según normatividad vigente."
-            elif 'respuesta' in nombre_campo or 'respuesta' in placeholder:
-                return "Respuesta: Documentación completa y procedimiento correcto."
-            elif 'comentario' in nombre_campo or 'comentario' in placeholder:
-                return "Comentario: Sin observaciones adicionales."
-            elif 'justificacion' in nombre_campo or 'justificacion' in placeholder:
-                return "Justificación: Servicio necesario según criterio médico."
+            # Verificar URL específica
+            url_actual = self.page.url
+            if "respuestaGlosastart" not in url_actual:
+                self._registrar_estado(f"❌ URL incorrecta: {url_actual}", "error")
+                return False
+            
+            # Esperar carga completa
+            await self.page.wait_for_load_state('networkidle', timeout=15000)
+            await asyncio.sleep(3)
+            
+            # Verificar elementos específicos con selectores mejorados
+            elementos_clave = [
+                (self.selectores_glosa.get('info_cuenta_header'), 'Header de cuenta'),
+                (self.selectores_glosa.get('tabla_items_glosa'), 'Tabla de items'),
+                ('form, .form', 'Formulario de respuesta')
+            ]
+            
+            elementos_encontrados = 0
+            for selector, descripcion in elementos_clave:
+                if selector:
+                    elemento = self.page.locator(selector)
+                    if await elemento.count() > 0:
+                        elementos_encontrados += 1
+                        self._registrar_estado(f"✅ {descripcion} encontrado")
+                    else:
+                        self._registrar_estado(f"⚠️ {descripcion} no encontrado", "warning")
+            
+            # Consideramos exitoso si encontramos al menos 1 elemento
+            if elementos_encontrados >= 1:
+                self._registrar_estado(f"✅ Pantalla verificada ({elementos_encontrados}/3 elementos)")
+                return True
             else:
-                return "Información completada automáticamente."
+                self._registrar_estado(f"❌ Pantalla no verificada (0/3 elementos)", "error")
+                return False
                 
         except Exception as e:
-            return "Respuesta automática."
-    
-    def _guardar_detalle_glosa(self, idcuenta: str, indice: int, glosa: Dict, estado: str, error: str = None):
-        """
-        Guarda el detalle de una glosa en la base de datos.
-        
-        Args:
-            idcuenta (str): ID de la cuenta
-            indice (int): Índice de la glosa
-            glosa (Dict): Datos de la glosa
-            estado (str): Estado del procesamiento
-            error (str): Mensaje de error si hay
-        """
-        try:
-            # PERSONALIZAR SEGÚN TU ESTRUCTURA DE BD
-            detalle = {
-                'idcuenta': idcuenta,
-                'indice_glosa': indice,
-                'datos_glosa': str(glosa)[:500],  # Limitar tamaño
-                'estado': estado,
-                'error': error,
-                'fecha_procesamiento': 'NOW()'
-            }
-            
-            # Si tienes método específico en tu db_manager, descomenta:
-            # self.db_manager.guardar_detalle_glosa(detalle)
-            
-        except Exception as e:
-            self._registrar_estado(f"❌ Error guardando detalle de glosa: {e}", "error")
+            self._registrar_estado(f"❌ Error verificando pantalla: {e}", "error")
+            return False
     
     async def _finalizar_procesamiento_glosa(self, idcuenta: str) -> bool:
-        """
-        Finaliza el procesamiento de la glosa (botones de finalizar, etc.).
-        
-        Args:
-            idcuenta (str): ID de la cuenta
-            
-        Returns:
-            bool: True si se finalizó correctamente
-        """
+        """Versión mejorada de finalización."""
         try:
-            self._registrar_estado(f"🏁 Finalizando procesamiento de glosa para cuenta {idcuenta}")
+            self._registrar_estado(f"🏁 Finalizando procesamiento mejorado para cuenta {idcuenta}")
             
-            # Intentar múltiples selectores para botón de finalizar
+            # Intentar múltiples selectores para botón de guardar/finalizar
             selectores_finalizar = [
-                self.selectores_glosa.get('boton_finalizar', ''),
+                self.selectores_glosa.get('boton_guardar_respuesta', ''),
+                '.btn-guardar',
                 '.btn-finalizar',
-                '.btn-finish',
-                '.finalizar',
                 'button[type="submit"]',
                 '.btn-primary',
                 '.btn-success'
             ]
-            
-            boton_encontrado = False
             
             for selector in selectores_finalizar:
                 if selector:
@@ -684,45 +544,32 @@ class ProcesadorGlosaIndividual:
                         try:
                             await boton.first.scroll_into_view_if_needed()
                             await boton.first.click()
-                            await asyncio.sleep(2)
+                            await asyncio.sleep(3)
                             
-                            boton_encontrado = True
-                            self._registrar_estado(f"✅ Botón finalizar clickeado: {selector}")
-                            break
+                            self._registrar_estado(f"✅ Botón clickeado: {selector}")
+                            
+                            # Verificar mensaje de éxito
+                            mensaje_exito = self.page.locator(self.selectores_glosa.get('mensaje_exito', '.alert-success'))
+                            if await mensaje_exito.count() > 0:
+                                self._registrar_estado(f"✅ Confirmación de éxito detectada")
+                                return True
+                            
+                            # Si no hay mensaje específico, asumir éxito
+                            return True
+                            
                         except Exception as e:
                             self._registrar_estado(f"⚠️ Error con botón {selector}: {e}", "warning")
                             continue
             
-            if not boton_encontrado:
-                self._registrar_estado("⚠️ No se encontró botón de finalizar específico", "warning")
-            
-            # Verificar mensaje de éxito
-            await asyncio.sleep(2)
-            mensaje_exito = self.page.locator(self.selectores_glosa.get('mensaje_exito', '.alert-success'))
-            if await mensaje_exito.count() > 0:
-                self._registrar_estado(f"✅ Mensaje de éxito detectado para cuenta {idcuenta}")
-                return True
-            
-            # Si no hay mensaje específico, asumir que está finalizado
-            self._registrar_estado(f"✅ Procesamiento finalizado para cuenta {idcuenta}")
-            return True
+            self._registrar_estado("⚠️ No se encontró botón de finalizar, continuando...", "warning")
+            return True  # Asumir éxito si no hay botón específico
             
         except Exception as e:
             self._registrar_estado(f"❌ Error finalizando procesamiento: {e}", "error")
             return False
     
     def _crear_resultado_error(self, idcuenta: str, mensaje: str) -> Dict:
-        """
-        Crea un resultado de error estándar.
-        
-        Args:
-            idcuenta (str): ID de la cuenta
-            mensaje (str): Mensaje de error
-            
-        Returns:
-            Dict: Resultado de error
-        """
-        # Actualizar estado en BD como fallido
+        """Crea resultado de error y actualiza BD."""
         self.db_manager.update_cuenta_estado(
             idcuenta, 
             EstadoCuenta.FALLIDO, 
