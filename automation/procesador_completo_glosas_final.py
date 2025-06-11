@@ -237,13 +237,13 @@ class ProcesadorCompletoGlosasImplementado:
             self.configuraciones_respuesta = {}
     
     async def _obtener_cuentas_pendientes(self) -> List[Dict]:
-        """Obtiene cuentas pendientes de procesamiento."""
+        """Obtiene cuentas que están pendientes de procesamiento."""
         try:
             self._log("📋 Obteniendo cuentas pendientes")
-            
+
             # Verificar cuentas pendientes en BD
             cuentas_bd_pendientes = []
-            
+
             try:
                 with self.db_manager.get_connection() as conn:
                     cursor = conn.execute("""
@@ -253,7 +253,7 @@ class ProcesadorCompletoGlosasImplementado:
                         ORDER BY created_at ASC
                         LIMIT 20
                     """)
-                    
+
                     for row in cursor.fetchall():
                         cuentas_bd_pendientes.append({
                             'idcuenta': row['idcuenta'],
@@ -262,50 +262,111 @@ class ProcesadorCompletoGlosasImplementado:
                         })
             except Exception as e:
                 self._log(f"⚠️ Error consultando BD: {e}", "warning")
-            
-            # Si no hay pendientes en BD, tomar las primeras de la tabla
+
+            # Si no hay pendientes en BD, extraer desde tabla
             if not cuentas_bd_pendientes:
                 self._log("⚠️ No hay pendientes en BD, obteniendo desde tabla")
                 cuentas_bd_pendientes = await self._obtener_cuentas_desde_tabla(5)
-            
+
+                # *** AGREGAR ESTO: Forzar actualización después de extraer ***
+                if cuentas_bd_pendientes:
+                    self._log("🔄 Enviando señal para actualizar UI...")
+                    # Simular tiempo de procesamiento para que la UI se actualice
+                    await asyncio.sleep(2)
+
             self._log(f"📊 Cuentas pendientes: {len(cuentas_bd_pendientes)}")
             return cuentas_bd_pendientes
-            
+
         except Exception as e:
             self._log(f"❌ Error obteniendo cuentas pendientes: {e}", "error")
             return []
     
     async def _obtener_cuentas_desde_tabla(self, limite: int) -> List[Dict]:
-        """Obtiene cuentas directamente de la tabla visible."""
+        """Obtiene cuentas directamente de la tabla visible y las guarda en BD con TODOS los datos."""
         try:
             cuentas = []
             filas = self.page.locator(self.selectores['filas_tabla_principal'])
             total_filas = await filas.count()
-            
+
+            self._log(f"📊 Extrayendo máximo {limite} cuentas de {total_filas} filas disponibles")
+
             for i in range(min(total_filas, limite)):
                 try:
                     fila = filas.nth(i)
                     celdas = fila.locator("td")
-                    
-                    if await celdas.count() >= 4:
+                    total_celdas = await celdas.count()
+
+                    if total_celdas >= 8:  # Verificar que tiene todas las columnas
+                        # EXTRAER TODOS LOS DATOS según el HTML que enviaste
                         idcuenta = await celdas.nth(0).text_content()
+                        numero_radicacion = await celdas.nth(1).text_content()
+                        fecha_radicacion = await celdas.nth(2).text_content()
                         proveedor = await celdas.nth(3).text_content()
-                        
-                        cuentas.append({
+                        numero_factura = await celdas.nth(4).text_content()
+                        fecha_factura = await celdas.nth(5).text_content()
+                        valor_factura_texto = await celdas.nth(6).text_content()
+                        valor_glosado_texto = await celdas.nth(7).text_content()
+
+                        # Preparar datos COMPLETOS de la cuenta
+                        cuenta_data = {
                             'idcuenta': idcuenta.strip(),
-                            'proveedor': proveedor.strip()[:50],
-                            'estado': 'PENDIENTE'
-                        })
+                            'numero_radicacion': numero_radicacion.strip(),
+                            'fecha_radicacion': fecha_radicacion.strip(),
+                            'proveedor': proveedor.strip()[:200],  # Permitir más caracteres
+                            'numero_factura': numero_factura.strip(),
+                            'fecha_factura': fecha_factura.strip(),
+                            'valor_factura': self._parsear_moneda(valor_factura_texto),
+                            'valor_glosado': self._parsear_moneda(valor_glosado_texto)
+                        }
+
+                        # *** GUARDAR EN BASE DE DATOS ***
+                        try:
+                            cuenta_bd_id = self.db_manager.create_or_update_cuenta(cuenta_data)
+                            self._log(f"✅ Cuenta {idcuenta} guardada completa en BD - ID: {cuenta_bd_id}")
+                            self._log(f"   📋 Proveedor: {proveedor[:30]}...")
+                            self._log(f"   💰 Valor Glosado: ${cuenta_data['valor_glosado']:,.2f}")
+
+                            # Agregar ID de BD para referencia
+                            cuenta_data['bd_id'] = cuenta_bd_id
+                            cuentas.append(cuenta_data)
+
+                        except Exception as e:
+                            self._log(f"❌ Error guardando cuenta {idcuenta} en BD: {e}", "error")
+                            # Agregar sin ID de BD como fallback
+                            cuentas.append(cuenta_data)
+                    else:
+                        self._log(f"⚠️ Fila {i} tiene solo {total_celdas} celdas, esperadas 8", "warning")
+
                 except Exception as e:
                     self._log(f"⚠️ Error obteniendo cuenta en fila {i}: {e}", "warning")
                     continue
-            
+
+            self._log(f"💾 Proceso completado: {len(cuentas)} cuentas extraídas con datos completos")
             return cuentas
-            
+
         except Exception as e:
             self._log(f"❌ Error obteniendo cuentas desde tabla: {e}", "error")
             return []
-    
+
+    def _parsear_moneda(self, valor: str) -> float:
+        """Convierte texto de moneda a float (mejorado para el formato de tu tabla)."""
+        try:
+            if not valor:
+                return 0.0
+
+            # Limpiar el texto: remover símbolos y espacios
+            limpio = valor.replace('$', '').replace(',', '').replace(' ', '').strip()
+
+            if not limpio:
+                return 0.0
+
+            # Convertir directamente a float (ya viene con punto decimal correcto)
+            return float(limpio)
+
+        except Exception as e:
+            self._log(f"⚠️ Error parseando moneda '{valor}': {e}", "warning")
+            return 0.0
+
     async def _procesar_cuenta_completa(self, idcuenta: str) -> Dict:
         """
         Procesa una cuenta completa: hacer clic, procesar todas las glosas, terminar.
@@ -535,29 +596,44 @@ class ProcesadorCompletoGlosasImplementado:
             return False
     
     async def _seleccionar_respuesta_dropdown(self) -> bool:
-        """Selecciona la respuesta en el dropdown Select2."""
+        """Selecciona la respuesta en el dropdown Select2 usando XPath específico."""
         try:
-            # Hacer clic en el container de Select2
+            # Hacer clic en el container de Select2 para abrir el dropdown
             select2_container = self.page.locator(self.selectores['select2_container'])
             await select2_container.click()
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)  # Dar tiempo para que se abra
             
-            # Buscar y hacer clic en la opción "999 SUBSANADA"
-            opcion_999 = self.page.locator('text=999 SUBSANADA (GLOSA O DEVOLUCION NO ACEPTADA)')
+            # Usar el XPath específico que me diste
+            xpath_opcion_999 = "//li[@class='select2-results__option select2-results__option--selectable select2-results__option--selected select2-results__option--highlighted'][contains(.,'999 SUBSANADA (GLOSA O DEVOLUCION NO ACEPTADA)')]"
             
+            opcion_999 = self.page.locator(f"xpath={xpath_opcion_999}")
+            
+            # Verificar que existe
             if await opcion_999.count() > 0:
                 await opcion_999.click()
                 await asyncio.sleep(1)
-                self._log("✅ Opción 999 SUBSANADA seleccionada")
+                self._log("✅ Opción 999 SUBSANADA seleccionada con XPath específico")
                 return True
             else:
-                self._log("❌ No se encontró opción 999 SUBSANADA", "error")
-                return False
+                # Fallback: buscar por texto más específico
+                self._log("⚠️ XPath específico no encontrado, intentando fallback...", "warning")
                 
+                # Intentar con selector más específico del <li>
+                fallback_selector = "li.select2-results__option:has-text('999 SUBSANADA')"
+                opcion_fallback = self.page.locator(fallback_selector)
+                
+                if await opcion_fallback.count() > 0:
+                    await opcion_fallback.first.click()
+                    await asyncio.sleep(1)
+                    self._log("✅ Opción 999 SUBSANADA seleccionada con fallback")
+                    return True
+                else:
+                    self._log("❌ No se encontró opción 999 SUBSANADA en ningún selector", "error")
+                    return False
+                    
         except Exception as e:
             self._log(f"❌ Error seleccionando dropdown: {e}", "error")
             return False
-    
     async def _llenar_justificacion(self, respuesta_texto: str) -> bool:
         """Llena el campo de justificación."""
         try:
