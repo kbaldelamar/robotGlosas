@@ -57,23 +57,34 @@ class LoginHandler:
             args=['--no-sandbox', '--disable-web-security']
         )
         
-        # Crear página
+        # Crear página con timeout extendido
         self.page = await self.browser.new_page()
-        self.page.set_default_timeout(Settings.BROWSER_TIMEOUT)
+        self.page.set_default_timeout(60000)  # Aumentar a 60 segundos
+        self.page.set_default_navigation_timeout(60000)  # Específico para navegación
         
         self.logger.info("Navegador abierto correctamente")
     
     async def _navigate_to_site(self) -> None:
-        """Navega a la URL de CTA Médicas."""
+        """Navega a la URL de CTA Médicas y espera a que el formulario de login esté disponible."""
         self.logger.info(f"Navegando a: {Settings.LOGIN_URL}")
-        
-        # Ir a la URL que sabemos que funciona
-        await self.page.goto(Settings.LOGIN_URL)
-        await self.page.wait_for_load_state('domcontentloaded')
-        
-        # Obtener información básica de la página
-        title = await self.page.title()
-        self.logger.info(f"Página cargada: {title}")
+
+        # Ir a la URL
+        await self.page.goto(Settings.LOGIN_URL, wait_until='domcontentloaded')
+
+        # Esperar explícitamente a que el formulario de login aparezca
+        try:
+            self.logger.info("Esperando a que el formulario de login aparezca...")
+            # Aumentar el timeout para dar más tiempo a la carga
+            await self.page.wait_for_selector('#usuarioIngreso', timeout=60000)
+            self.logger.info("Formulario de login detectado correctamente")
+
+            # Obtener información básica de la página
+            title = await self.page.title()
+            self.logger.info(f"Página cargada: {title}")
+        except Exception as e:
+            self.logger.error(f"Error esperando al formulario de login: {e}")
+            await self.page.screenshot(path="error_loading_login_form.png")
+            raise
     
     async def _do_login(self, username: str, password: str) -> bool:
         """
@@ -151,62 +162,65 @@ class LoginHandler:
     
     async def _find_username_field(self):
         """Busca el campo de usuario específico de CTA Médicas."""
-        # Selectores específicos para CTA Médicas
+        # Selector específico del HTML compartido
         selectors = [
-            '#usuarioIngreso',                    # Por ID (más confiable)
-            '[name="usuarioIngreso"]',           # Por name
-            'input[name="usuarioIngreso"]',      # Más específico
-            '#usuarioIngreso.form-control',      # Con clase específica
+            '#usuarioIngreso',
+            'input[name="usuarioIngreso"]',
+            'input[id="usuarioIngreso"]'
         ]
-        
+
+        # Esperar un tiempo adicional si es necesario
+        try:
+            await self.page.wait_for_selector('#usuarioIngreso', timeout=10000)
+        except Exception as e:
+            self.logger.warning(f"Tiempo de espera excedido para el campo de usuario: {e}")
+            # Continuar intentando encontrarlo de todos modos
+
         for selector in selectors:
             element = self.page.locator(selector)
             if await element.count() > 0:
                 self.logger.info(f"Campo de usuario encontrado: {selector}")
                 return element
-        
-        # Si no encuentra los específicos, probar XPath
-        xpath_selector = '/html[1]/body[1]/div[1]/div[1]/div[1]/div[2]/div[1]/form[1]/div[1]/input[1]'
-        element = self.page.locator(f'xpath={xpath_selector}')
-        if await element.count() > 0:
-            self.logger.info(f"Campo de usuario encontrado por XPath")
-            return element
-        
+
         self.logger.error("No se encontró el campo de usuario de CTA Médicas")
+        await self.page.screenshot(path="error_no_username_field.png")
         return None
     
     async def _find_password_field(self):
-        """Busca el campo de contraseña."""
-        selectors = [
-            'input[type="password"]',
-            '[name="password"]',
-            '#password'
-        ]
-        
-        for selector in selectors:
-            element = self.page.locator(selector)
-            if await element.count() > 0:
-                self.logger.info(f"Campo de contraseña encontrado: {selector}")
-                return element
-        
-        return None
+       """Busca el campo de contraseña."""
+       selectors = [
+           '#contraseniaIngreso',
+           'input[name="contraseniaIngreso"]',
+           'input[type="password"]'
+       ]
+       
+       for selector in selectors:
+           element = self.page.locator(selector)
+           if await element.count() > 0:
+               self.logger.info(f"Campo de contraseña encontrado: {selector}")
+               return element
+       
+       self.logger.error("No se encontró el campo de contraseña")
+       await self.page.screenshot(path="error_no_password_field.png")
+       return None
     
     async def _find_submit_button(self):
         """Busca el botón de envío."""
         selectors = [
-            '[type="submit"]',
+            'button[name="validarSesion"]',
+            'button.btn-primary',
             'button[type="submit"]',
-            'button:has-text("Iniciar")',
-            'button:has-text("Entrar")',
-            '.btn-primary'
+            'button:has-text("Ingresar")'
         ]
-        
+
         for selector in selectors:
             element = self.page.locator(selector)
             if await element.count() > 0:
                 self.logger.info(f"Botón de envío encontrado: {selector}")
                 return element
-        
+
+        self.logger.error("No se encontró el botón de envío")
+        await self.page.screenshot(path="error_no_submit_button.png")
         return None
     
     async def _check_login_success(self) -> bool:
