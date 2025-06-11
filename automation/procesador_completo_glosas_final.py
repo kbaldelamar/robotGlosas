@@ -602,12 +602,12 @@ class ProcesadorCompletoGlosasImplementado:
             select2_container = self.page.locator(self.selectores['select2_container'])
             await select2_container.click()
             await asyncio.sleep(2)  # Dar tiempo para que se abra
-            
+
             # Usar el XPath específico que me diste
             xpath_opcion_999 = "//li[@class='select2-results__option select2-results__option--selectable select2-results__option--selected select2-results__option--highlighted'][contains(.,'999 SUBSANADA (GLOSA O DEVOLUCION NO ACEPTADA)')]"
-            
+
             opcion_999 = self.page.locator(f"xpath={xpath_opcion_999}")
-            
+
             # Verificar que existe
             if await opcion_999.count() > 0:
                 await opcion_999.click()
@@ -617,11 +617,11 @@ class ProcesadorCompletoGlosasImplementado:
             else:
                 # Fallback: buscar por texto más específico
                 self._log("⚠️ XPath específico no encontrado, intentando fallback...", "warning")
-                
+
                 # Intentar con selector más específico del <li>
                 fallback_selector = "li.select2-results__option:has-text('999 SUBSANADA')"
                 opcion_fallback = self.page.locator(fallback_selector)
-                
+
                 if await opcion_fallback.count() > 0:
                     await opcion_fallback.first.click()
                     await asyncio.sleep(1)
@@ -630,7 +630,7 @@ class ProcesadorCompletoGlosasImplementado:
                 else:
                     self._log("❌ No se encontró opción 999 SUBSANADA en ningún selector", "error")
                     return False
-                    
+
         except Exception as e:
             self._log(f"❌ Error seleccionando dropdown: {e}", "error")
             return False
@@ -903,29 +903,103 @@ class ProcesadorCompletoGlosasImplementado:
             self._log(f"⚠️ Error marcando cuenta {idcuenta} como fallida: {e}", "warning")
     
     async def _guardar_glosa_procesada(self, idcuenta: str, glosa_info: Dict, configuracion: Dict):
-        """Guarda una glosa como procesada en la BD."""
+        """Guarda una glosa como procesada en ambas tablas."""
         try:
-            # Implementar guardado en glosa_items_detalle
-            # (Código específico de BD aquí)
-            pass
+            cuenta_id = await self._obtener_cuenta_id(idcuenta)
+            if not cuenta_id:
+                return
+
+            with self.db_manager.get_connection() as conn:
+                # 1. Insertar en glosas_detalles_procesadas
+                conn.execute("""
+                    INSERT INTO glosas_detalles_procesadas 
+                    (idcuenta, id_glosa, id_item, descripcion_item, tipo, 
+                     justificacion, valor_glosado, estado_original,
+                     respuesta_aplicada, config_id, estado_procesamiento, 
+                     fecha_procesamiento, error_mensaje)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                """, (
+                    idcuenta,
+                    glosa_info['id_glosa'],
+                    glosa_info.get('id_item', ''),
+                    glosa_info.get('descripcion_item', ''),
+                    glosa_info.get('tipo', ''),
+                    glosa_info.get('justificacion', ''),
+                    self._parsear_moneda(glosa_info.get('valor_glosado', '0')),
+                    glosa_info.get('estado', ''),
+                    configuracion['respuesta'],
+                    None,  # config_id si lo tienes
+                    'PROCESADO',
+                    None  # sin error
+                ))
+
+                # 2. Actualizar glosa_items_detalle
+                conn.execute("""
+                    UPDATE glosa_items_detalle 
+                    SET fue_procesado = TRUE,
+                        fecha_procesamiento = CURRENT_TIMESTAMP,
+                        respuesta_enviada = ?,
+                        archivo_subido = ?
+                    WHERE cuenta_principal_id = ? AND id_glosa = ?
+                """, (
+                    configuracion['respuesta'],
+                    configuracion.get('pdf_path', ''),
+                    cuenta_id,
+                    glosa_info['id_glosa']
+                ))
+
+                conn.commit()
+                self._log(f"✅ Glosa {glosa_info['id_glosa']} guardada como procesada en ambas tablas")
+
         except Exception as e:
             self._log(f"⚠️ Error guardando glosa procesada: {e}", "warning")
     
     async def _guardar_glosa_fallida(self, idcuenta: str, glosa_info: Dict, error: str):
-        """Guarda una glosa como fallida en la BD."""
+        """Guarda una glosa como fallida en ambas tablas."""
         try:
-            # Implementar guardado con estado ERROR
-            # (Código específico de BD aquí)
-            pass
+            cuenta_id = await self._obtener_cuenta_id(idcuenta)
+            if not cuenta_id:
+                return
+                
+            with self.db_manager.get_connection() as conn:
+            # 1. Insertar en glosas_detalles_procesadas con error
+             conn.execute("""
+                 INSERT INTO glosas_detalles_procesadas 
+                 (idcuenta, id_glosa, estado_procesamiento, error_mensaje)
+                 VALUES (?, ?, 'ERROR', ?)
+             """, (idcuenta, glosa_info['id_glosa'], error))
+
+             # 2. Actualizar glosa_items_detalle
+             conn.execute("""
+                 UPDATE glosa_items_detalle 
+                 SET error_procesamiento = ?,
+                     fecha_procesamiento = CURRENT_TIMESTAMP
+                 WHERE cuenta_principal_id = ? AND id_glosa = ?
+             """, (error, cuenta_id, glosa_info['id_glosa']))
+
+             conn.commit()
+            
         except Exception as e:
             self._log(f"⚠️ Error guardando glosa fallida: {e}", "warning")
-    
+
     async def _guardar_glosa_sin_config(self, idcuenta: str, glosa_info: Dict):
-        """Guarda una glosa como sin configuración en la BD."""
+        """Guarda una glosa como sin configuración."""
         try:
-            # Implementar guardado con estado SIN_CONFIG
-            # (Código específico de BD aquí)
-            pass
+            cuenta_id = await self._obtener_cuenta_id(idcuenta)
+            if not cuenta_id:
+                return
+
+            with self.db_manager.get_connection() as conn:
+                # Solo actualizar glosa_items_detalle
+                conn.execute("""
+                    UPDATE glosa_items_detalle 
+                    SET error_procesamiento = 'SIN_CONFIGURACION',
+                        es_procesable = FALSE
+                    WHERE cuenta_principal_id = ? AND id_glosa = ?
+                """, (cuenta_id, glosa_info['id_glosa']))
+
+                conn.commit()
+
         except Exception as e:
             self._log(f"⚠️ Error guardando glosa sin config: {e}", "warning")
     
@@ -990,34 +1064,47 @@ class ProcesadorCompletoGlosasImplementado:
             self._log(f"❌ Error navegando/haciendo clic cuenta {idcuenta}: {e}", "error")
             return False
     
+    async def _obtener_cuenta_id(self, idcuenta: str) -> Optional[int]:
+        """Obtiene el ID interno de la cuenta desde la BD."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT id FROM cuenta_glosas_principal WHERE idcuenta = ?",
+                    (idcuenta,)
+                )
+                row = cursor.fetchone()
+                return row['id'] if row else None
+        except Exception as e:
+            self._log(f"❌ Error obteniendo ID de cuenta: {e}", "error")
+            return None
+
+
     async def _procesar_todas_las_glosas_cuenta(self, idcuenta: str) -> Dict:
-        """
-        Procesa todas las glosas de una cuenta específica.
-        
-        Args:
-            idcuenta (str): ID de la cuenta
-            
-        Returns:
-            Dict: Resultado del procesamiento
-        """
+        """Procesa todas las glosas de una cuenta específica."""
         try:
             self._log(f"📋 Procesando todas las glosas de cuenta {idcuenta}")
-            
+
             # Hacer scroll hasta la tabla de glosas
             await self._scroll_hasta_tabla_glosas()
-            
+
             # Extraer información de todas las glosas
             glosas_info = await self._extraer_glosas_de_tabla()
-            
+
             if not glosas_info:
                 return {'exito': False, 'error': 'No se encontraron glosas en la tabla'}
-            
+
             self._log(f"📊 Encontradas {len(glosas_info)} glosas para procesar")
-            
+
+            # *** NUEVO: GUARDAR TODAS LAS GLOSAS EN glosa_items_detalle ***
+            cuenta_id = await self._obtener_cuenta_id(idcuenta)
+            if cuenta_id:
+                for glosa in glosas_info:
+                    self._guardar_glosa_en_detalle(cuenta_id, glosa)
+
             glosas_procesadas = 0
             glosas_fallidas = 0
-            
-            # Procesar cada glosa individual
+
+                # Procesar cada glosa individual
             for i, glosa_info in enumerate(glosas_info):
                 id_glosa = glosa_info['id_glosa']
                 estado = glosa_info['estado']
@@ -1064,3 +1151,78 @@ class ProcesadorCompletoGlosasImplementado:
             error_msg = f"Error procesando glosas de cuenta {idcuenta}: {e}"
             self._log(error_msg, "error")
             return {'exito': False, 'error': error_msg}
+    
+    def _guardar_glosa_en_detalle(self, cuenta_id: int, glosa_info: Dict):
+        """Guarda una glosa en la tabla de detalle."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                # Verificar si ya existe
+                cursor = conn.execute("""
+                    SELECT id FROM glosa_items_detalle 
+                    WHERE cuenta_principal_id = ? AND id_glosa = ?
+                """, (cuenta_id, glosa_info['id_glosa']))
+
+                if cursor.fetchone():
+                    self._log(f"⚠️ Glosa {glosa_info['id_glosa']} ya existe, actualizando...")
+                    # Actualizar
+                    conn.execute("""
+                        UPDATE glosa_items_detalle 
+                        SET descripcion_item = ?, tipo = ?, descripcion = ?,
+                            justificacion = ?, valor_glosado = ?, estado_original = ?,
+                            created_at = CURRENT_TIMESTAMP
+                        WHERE cuenta_principal_id = ? AND id_glosa = ?
+                    """, (
+                        glosa_info.get('descripcion_item', ''),
+                        glosa_info.get('tipo', ''),
+                        glosa_info.get('descripcion', ''),
+                        glosa_info.get('justificacion', ''),
+                        self._parsear_moneda(glosa_info.get('valor_glosado', '0')),
+                        glosa_info.get('estado', 'SIN RESPUESTA'),
+                        cuenta_id,
+                        glosa_info['id_glosa']
+                    ))
+                else:
+                    # Insertar nueva
+                    conn.execute("""
+                        INSERT INTO glosa_items_detalle 
+                        (cuenta_principal_id, id_glosa, id_item, descripcion_item,
+                         tipo, descripcion, justificacion, valor_glosado, 
+                         estado_original, es_procesable)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        cuenta_id,
+                        glosa_info['id_glosa'],
+                        glosa_info.get('id_item', ''),
+                        glosa_info.get('descripcion_item', ''),
+                        glosa_info.get('tipo', ''),
+                        glosa_info.get('descripcion', ''),
+                        glosa_info.get('justificacion', ''),
+                        self._parsear_moneda(glosa_info.get('valor_glosado', '0')),
+                        glosa_info.get('estado', 'SIN RESPUESTA'),
+                        self._es_procesable(glosa_info)  # Determinar si es procesable
+                    ))
+
+                conn.commit()
+
+        except Exception as e:
+            self._log(f"❌ Error guardando glosa en detalle: {e}", "error")
+    
+    def _es_procesable(self, glosa_info: Dict) -> bool:
+        """Determina si una glosa es procesable según las reglas de negocio."""
+        tipo = glosa_info.get('tipo', '').upper()
+        justificacion = glosa_info.get('justificacion', '').upper()
+        estado = glosa_info.get('estado', '').upper()
+
+        # Es procesable si:
+        # 1. Tipo es TARIFAS y contiene MAYOR VALOR
+        # 2. Estado es SIN RESPUESTA
+        # 3. Hay configuración disponible para ella
+
+        if estado != 'SIN RESPUESTA':
+            return False
+
+        if tipo == 'TARIFAS' and 'MAYOR VALOR' in justificacion:
+            return True
+
+        # Verificar si hay configuración
+        return self._buscar_configuracion_glosa(tipo, justificacion) is not None
