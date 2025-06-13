@@ -4,7 +4,6 @@ from typing import Optional
 from playwright.async_api import Page
 from automation.login_handler import LoginHandler
 from automation.navigation_handler import NavigationHandler, AutomationState, NavigationState
-# CAMBIO: Usar el nuevo procesador completo implementado
 from automation.procesador_completo_glosas_final import ProcesadorCompletoGlosasImplementado
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
@@ -13,20 +12,29 @@ from config.settings import Settings
 class WebScraperGlosas:
     """
     Automatizador específico para gestión de glosas.
-    VERSIÓN FINAL CON PROCESADOR COMPLETO IMPLEMENTADO:
+    VERSIÓN FINAL CON SIGNALS PARA ACTUALIZACIÓN EN TIEMPO REAL:
     - Hace clic en cada botón de cuenta
     - Procesa todas las glosas individuales con modales
     - Maneja errores y regresa a tabla principal
     - Termina correctamente cada cuenta
+    - Actualiza interfaz en tiempo real
     """
     
-    def __init__(self):
-        """Inicializa el web scraper de glosas con procesador completo."""
+    def __init__(self, worker_thread=None):
+        """
+        Inicializa el web scraper de glosas con procesador completo.
+        
+        Args:
+            worker_thread: Thread con signals para actualización en tiempo real
+        """
         self.logger = logging.getLogger(__name__)
         self.login_handler = LoginHandler()
         self.navigation_handler: Optional[NavigationHandler] = None
         self.procesador_completo: Optional[ProcesadorCompletoGlosasImplementado] = None
         self.page: Optional[Page] = None
+        
+        # ✅ NUEVO: Worker para emitir signals en tiempo real
+        self.worker = worker_thread
         
         # Base de datos específica para glosas
         self.db_manager = DatabaseManagerGlosas()
@@ -47,7 +55,7 @@ class WebScraperGlosas:
             'tiempo_total': 0
         }
         
-        self._log_state("WebScraperGlosas inicializado con procesador completo")
+        self._log_state("WebScraperGlosas inicializado con procesador completo y signals en tiempo real")
         
     def _log_state(self, message: str, level: str = "info"):
         """Log con información de estado actual."""
@@ -64,7 +72,7 @@ class WebScraperGlosas:
     async def start_glosas_automation(self, username: str, password: str) -> bool:
         """
         MÉTODO PRINCIPAL: Inicia la automatización completa de glosas.
-        VERSIÓN FINAL con procesamiento real de modales.
+        VERSIÓN FINAL con procesamiento real de modales y actualización en tiempo real.
         
         Args:
             username (str): Usuario para login
@@ -81,8 +89,8 @@ class WebScraperGlosas:
             
             self.estadisticas_globales['inicio_proceso'] = asyncio.get_event_loop().time()
             
-            self._log_state("🚀 === INICIANDO AUTOMATIZACIÓN COMPLETA DE GLOSAS (FINAL) ===")
-            self._log_state("🎯 INCLUYE: Login → Navegación → Procesamiento Real de Modales → Terminar")
+            self._log_state("🚀 === INICIANDO AUTOMATIZACIÓN COMPLETA DE GLOSAS (CON TIEMPO REAL) ===")
+            self._log_state("🎯 INCLUYE: Login → Navegación → Procesamiento Real de Modales → Actualización en Tiempo Real")
             self._log_state("="*100)
             
             # ETAPA 1: LOGIN
@@ -93,7 +101,7 @@ class WebScraperGlosas:
             if not await self._etapa2_navegacion():
                 return False
             
-            # ETAPA 3: PROCESAMIENTO COMPLETO CON MODALES REALES
+            # ETAPA 3: PROCESAMIENTO COMPLETO CON MODALES REALES Y SIGNALS
             if not await self._etapa3_procesamiento_completo_final():
                 return False
             
@@ -105,6 +113,11 @@ class WebScraperGlosas:
             
             self._log_state("🎉 === AUTOMATIZACIÓN COMPLETA DE GLOSAS FINALIZADA ===")
             await self._mostrar_resumen_final()
+            
+            # ✅ NUEVO: Emitir signal final para actualizar interfaz
+            if self.worker:
+                self.worker.emit_tabla_refresh()
+                self._log_state("📡 Signal final enviado para actualizar interfaz completa")
             
             return True
             
@@ -186,7 +199,7 @@ class WebScraperGlosas:
     
     async def _etapa3_procesamiento_completo_final(self) -> bool:
         """
-        ETAPA 3: Procesamiento completo FINAL con modales reales.
+        ETAPA 3: Procesamiento completo FINAL con modales reales y signals en tiempo real.
         
         Returns:
             bool: True si se procesó correctamente
@@ -194,10 +207,10 @@ class WebScraperGlosas:
         try:
             self.automation_state.update(
                 method_name="_etapa3_procesamiento_completo_final",
-                action="ETAPA 3: Procesamiento completo final con modales"
+                action="ETAPA 3: Procesamiento completo final con modales y signals"
             )
             
-            self._log_state("⚙️ ETAPA 3: PROCESAMIENTO COMPLETO FINAL")
+            self._log_state("⚙️ ETAPA 3: PROCESAMIENTO COMPLETO FINAL CON TIEMPO REAL")
             self._log_state("-"*50)
             self._log_state("🎯 FUNCIONALIDADES INCLUIDAS:")
             self._log_state("   • Clic en botones de cuentas")
@@ -206,15 +219,17 @@ class WebScraperGlosas:
             self._log_state("   • Subida de archivos PDF")
             self._log_state("   • Finalización de cuentas")
             self._log_state("   • Manejo de errores y regreso a tabla principal")
+            self._log_state("   • ✅ ACTUALIZACIÓN EN TIEMPO REAL DE INTERFAZ")
             self._log_state("-"*50)
             
-            # Inicializar procesador completo implementado
+            # ✅ MODIFICADO: Inicializar procesador CON worker para signals
             self.procesador_completo = ProcesadorCompletoGlosasImplementado(
                 self.page, 
-                self.automation_state
+                self.automation_state,
+                worker_thread=self.worker  # ✅ PASAR WORKER PARA SIGNALS
             )
             
-            self._log_state("🚀 Iniciando procesamiento completo final...")
+            self._log_state("🚀 Iniciando procesamiento completo final con signals en tiempo real...")
             
             # Procesar todas las cuentas con funcionalidad completa
             procesadas, fallidas = await self.procesador_completo.procesar_filas_tabla()
@@ -239,6 +254,26 @@ class WebScraperGlosas:
         except Exception as e:
             self._log_state(f"❌ Error en ETAPA 3 (procesamiento final): {e}", "error")
             return False
+    
+    # ✅ NUEVOS MÉTODOS: Para emitir signals en tiempo real
+    def emit_data_imported(self, cantidad: int):
+        """Emite signal cuando se importan datos."""
+        if self.worker:
+            self.worker.emit_data_imported(cantidad)
+            self._log_state(f"📡 Signal emitido: {cantidad} cuentas importadas")
+    
+    def emit_cuenta_processed(self, idcuenta: str, estado: str):
+        """Emite signal cuando se procesa una cuenta."""
+        if self.worker:
+            self.worker.emit_cuenta_processed(idcuenta, estado)
+            emoji = "✅" if estado == "COMPLETADO" else "❌"
+            self._log_state(f"📡 Signal emitido: {emoji} Cuenta {idcuenta} -> {estado}")
+    
+    def emit_tabla_refresh(self):
+        """Emite signal para refrescar tabla."""
+        if self.worker:
+            self.worker.emit_tabla_refresh()
+            self._log_state("📡 Signal emitido: Refrescar tabla e interfaz")
     
     async def _mantener_abierto_para_inspeccion(self):
         """Mantiene el navegador abierto para inspeccionar la página."""
@@ -307,6 +342,7 @@ class WebScraperGlosas:
             self._log_state("   ✅ Finalización de cuentas")
             self._log_state("   ✅ Manejo de errores")
             self._log_state("   ✅ Base de datos completa")
+            self._log_state("   ✅ ACTUALIZACIÓN EN TIEMPO REAL")  # ✅ NUEVO
             
             self._log_state("="*100)
             

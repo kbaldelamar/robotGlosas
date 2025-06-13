@@ -126,6 +126,7 @@ class DatabaseManagerGlosas(DatabaseManager):
     def should_process_cuenta(self, idcuenta: str) -> bool:
         """
         Determina si una cuenta debe ser procesada basándose en su estado.
+        CORREGIDO: Lógica mejorada para el flujo de importación y procesamiento.
         
         Args:
             idcuenta (str): ID de la cuenta
@@ -136,26 +137,41 @@ class DatabaseManagerGlosas(DatabaseManager):
         estado = self.get_cuenta_estado(idcuenta)
         
         if estado is None:
-            # Primera vez, debe procesarse
-            self.logger.info(f"Cuenta {idcuenta}: Primera vez, se procesará")
+            # Primera vez, debe importarse (se creará como PENDIENTE)
+            self.logger.info(f"Cuenta {idcuenta}: Primera vez, se importará como PENDIENTE")
             return True
         
-        if estado in [EstadoCuenta.PENDIENTE, EstadoCuenta.FALLIDO]:
-            # Pendiente o falló anteriormente, reprocesar
-            self.logger.info(f"Cuenta {idcuenta}: Estado {estado.value}, se procesará")
+        if estado == EstadoCuenta.PENDIENTE:
+            # Está pendiente, debe procesarse
+            self.logger.info(f"Cuenta {idcuenta}: Estado PENDIENTE, se procesará")
             return True
         
-        if estado in [EstadoCuenta.EN_PROCESO, EstadoCuenta.COMPLETADO]:
-            # En proceso o completada, saltar
-            self.logger.info(f"Cuenta {idcuenta}: Estado {estado.value}, se saltará")
+        if estado == EstadoCuenta.FALLIDO:
+            # Falló anteriormente, dar otra oportunidad
+            self.logger.info(f"Cuenta {idcuenta}: Estado FALLIDO, se reintentará")
+            return True
+        
+        if estado == EstadoCuenta.EN_PROCESO:
+            # Ya está en proceso, no tocar (evitar duplicados)
+            self.logger.info(f"Cuenta {idcuenta}: Estado EN_PROCESO, se saltará para evitar duplicados")
+            return False
+        
+        if estado == EstadoCuenta.COMPLETADO:
+            # Ya está completada, saltar
+            self.logger.info(f"Cuenta {idcuenta}: Estado COMPLETADO, se saltará")
             return False
         
         # Caso por defecto, procesar
+        self.logger.info(f"Cuenta {idcuenta}: Estado desconocido ({estado}), se procesará por defecto")
         return True
+    
+    # EN LA CLASE DatabaseManagerGlosas (database/db_manager_glosas.py)
+    # REEMPLAZAR EL MÉTODO create_or_update_cuenta POR ESTE:
     
     def create_or_update_cuenta(self, cuenta_data: dict) -> int:
         """
         Crea o actualiza una cuenta en la base de datos.
+        MODIFICADO: Ahora crea/actualiza como PENDIENTE en lugar de EN_PROCESO
         
         Args:
             cuenta_data (dict): Datos de la cuenta extraídos de la tabla web
@@ -167,44 +183,47 @@ class DatabaseManagerGlosas(DatabaseManager):
             with self.get_connection() as conn:
                 # Verificar si existe
                 cursor = conn.execute("""
-                    SELECT id FROM cuenta_glosas_principal WHERE idcuenta = ?
+                    SELECT id, estado FROM cuenta_glosas_principal WHERE idcuenta = ?
                 """, (cuenta_data['idcuenta'],))
                 
                 existing_row = cursor.fetchone()
                 
                 if existing_row:
-                    # Actualizar existente
+                    # Actualizar existente SOLO si NO está completada
                     cuenta_id = existing_row['id']
-                    conn.execute("""
-                        UPDATE cuenta_glosas_principal 
-                        SET numero_radicacion = ?, fecha_radicacion = ?, proveedor = ?,
-                            numero_factura = ?, fecha_factura = ?, valor_factura = ?,
-                            valor_glosado = ?, estado = ?, fecha_inicio = ?,
-                            intentos = intentos + 1, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    """, (
-                        cuenta_data.get('numero_radicacion', ''),
-                        cuenta_data.get('fecha_radicacion', ''),
-                        cuenta_data.get('proveedor', ''),
-                        cuenta_data.get('numero_factura', ''),
-                        cuenta_data.get('fecha_factura', ''),
-                        cuenta_data.get('valor_factura', 0.0),
-                        cuenta_data.get('valor_glosado', 0.0),
-                        EstadoCuenta.EN_PROCESO.value,
-                        datetime.now(),
-                        cuenta_id
-                    ))
+                    estado_actual = existing_row['estado']
                     
-                    self.logger.info(f"Cuenta {cuenta_data['idcuenta']} actualizada")
+                    if estado_actual != 'COMPLETADO':
+                        conn.execute("""
+                            UPDATE cuenta_glosas_principal 
+                            SET numero_radicacion = ?, fecha_radicacion = ?, proveedor = ?,
+                                numero_factura = ?, fecha_factura = ?, valor_factura = ?,
+                                valor_glosado = ?, estado = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (
+                            cuenta_data.get('numero_radicacion', ''),
+                            cuenta_data.get('fecha_radicacion', ''),
+                            cuenta_data.get('proveedor', ''),
+                            cuenta_data.get('numero_factura', ''),
+                            cuenta_data.get('fecha_factura', ''),
+                            cuenta_data.get('valor_factura', 0.0),
+                            cuenta_data.get('valor_glosado', 0.0),
+                            EstadoCuenta.PENDIENTE.value,  # ✅ CAMBIO: PENDIENTE en lugar de EN_PROCESO
+                            cuenta_id
+                        ))
+                        
+                        self.logger.info(f"Cuenta {cuenta_data['idcuenta']} actualizada como PENDIENTE")
+                    else:
+                        self.logger.info(f"Cuenta {cuenta_data['idcuenta']} ya está COMPLETADA, no se actualiza")
                     
                 else:
-                    # Crear nueva
+                    # Crear nueva como PENDIENTE
                     cursor = conn.execute("""
                         INSERT INTO cuenta_glosas_principal 
                         (idcuenta, numero_radicacion, fecha_radicacion, proveedor,
                          numero_factura, fecha_factura, valor_factura, valor_glosado,
-                         estado, fecha_inicio, intentos)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                         estado, intentos)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                     """, (
                         cuenta_data['idcuenta'],
                         cuenta_data.get('numero_radicacion', ''),
@@ -214,12 +233,11 @@ class DatabaseManagerGlosas(DatabaseManager):
                         cuenta_data.get('fecha_factura', ''),
                         cuenta_data.get('valor_factura', 0.0),
                         cuenta_data.get('valor_glosado', 0.0),
-                        EstadoCuenta.EN_PROCESO.value,
-                        datetime.now()
+                        EstadoCuenta.PENDIENTE.value,  # ✅ CAMBIO: PENDIENTE en lugar de EN_PROCESO
                     ))
                     
                     cuenta_id = cursor.lastrowid
-                    self.logger.info(f"Cuenta {cuenta_data['idcuenta']} creada con ID {cuenta_id}")
+                    self.logger.info(f"Cuenta {cuenta_data['idcuenta']} creada como PENDIENTE con ID {cuenta_id}")
                 
                 conn.commit()
                 return cuenta_id
@@ -227,7 +245,7 @@ class DatabaseManagerGlosas(DatabaseManager):
         except sqlite3.Error as e:
             self.logger.error(f"Error creando/actualizando cuenta: {e}")
             raise
-    
+        
     def save_glosa_item(self, cuenta_id: int, glosa_data: dict) -> int:
         """
         Guarda un item de glosa individual.

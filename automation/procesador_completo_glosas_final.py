@@ -16,7 +16,7 @@ class ProcesadorCompletoGlosasImplementado:
     4. Actualiza estados en BD apropiadamente
     """
     
-    def __init__(self, page: Page, automation_state: AutomationState):
+    def __init__(self, page: Page, automation_state: AutomationState, worker_thread=None):
         """
         Inicializa el procesador completo implementado.
         
@@ -29,6 +29,8 @@ class ProcesadorCompletoGlosasImplementado:
         self.logger = logging.getLogger(__name__)
         self.db_manager = DatabaseManagerGlosas()
         self.navigation_handler = NavigationHandler(self.page, self.state)
+
+        self.worker = worker_thread
         
         # Selectores específicos identificados
         self.selectores = {
@@ -237,19 +239,22 @@ class ProcesadorCompletoGlosasImplementado:
             self.configuraciones_respuesta = {}
     
     async def _obtener_cuentas_pendientes(self) -> List[Dict]:
-        """Obtiene cuentas que están pendientes de procesamiento."""
+        """
+        Obtiene cuentas que están pendientes de procesamiento.
+        CORREGIDO: Ahora busca primero las PENDIENTES de la BD, y si no hay, importa nuevas.
+        """
         try:
-            self._log("📋 Obteniendo cuentas pendientes")
+            self._log("📋 Obteniendo cuentas pendientes para procesamiento")
 
-            # Verificar cuentas pendientes en BD
+            # ✅ PASO 1: Buscar cuentas PENDIENTES en BD (prioridad)
             cuentas_bd_pendientes = []
 
             try:
                 with self.db_manager.get_connection() as conn:
                     cursor = conn.execute("""
-                        SELECT idcuenta, proveedor, estado 
+                        SELECT idcuenta, proveedor, estado, valor_glosado, fecha_radicacion
                         FROM cuenta_glosas_principal 
-                        WHERE estado IN ('PENDIENTE', 'FALLIDO')
+                        WHERE estado = 'PENDIENTE'
                         ORDER BY created_at ASC
                         LIMIT 20
                     """)
@@ -258,46 +263,100 @@ class ProcesadorCompletoGlosasImplementado:
                         cuentas_bd_pendientes.append({
                             'idcuenta': row['idcuenta'],
                             'proveedor': row['proveedor'],
-                            'estado': row['estado']
+                            'estado': row['estado'],
+                            'valor_glosado': row['valor_glosado'],
+                            'fecha_radicacion': row['fecha_radicacion']
                         })
+
+                    self._log(f"🔍 Encontradas {len(cuentas_bd_pendientes)} cuentas PENDIENTES en BD")
+
             except Exception as e:
                 self._log(f"⚠️ Error consultando BD: {e}", "warning")
 
-            # Si no hay pendientes en BD, extraer desde tabla
-            if not cuentas_bd_pendientes:
-                self._log("⚠️ No hay pendientes en BD, obteniendo desde tabla")
-                cuentas_bd_pendientes = await self._obtener_cuentas_desde_tabla(5)
+            # ✅ PASO 2: Si hay cuentas PENDIENTES, procesarlas
+            if cuentas_bd_pendientes:
+                self._log("✅ Procesando cuentas PENDIENTES existentes en BD")
 
-                # *** AGREGAR ESTO: Forzar actualización después de extraer ***
-                if cuentas_bd_pendientes:
-                    self._log("🔄 Enviando señal para actualizar UI...")
-                    # Simular tiempo de procesamiento para que la UI se actualice
-                    await asyncio.sleep(2)
+                # Marcar como EN_PROCESO solo cuando vaya a procesarlas
+                for cuenta in cuentas_bd_pendientes:
+                    try:
+                        self.db_manager.update_cuenta_estado(
+                            cuenta['idcuenta'], 
+                            EstadoCuenta.EN_PROCESO,
+                            "Iniciando procesamiento automático"
+                        )
+                        self._log(f"🔄 Cuenta {cuenta['idcuenta']} marcada como EN_PROCESO")
+                    except Exception as e:
+                        self._log(f"⚠️ Error marcando cuenta {cuenta['idcuenta']}: {e}", "warning")
 
-            self._log(f"📊 Cuentas pendientes: {len(cuentas_bd_pendientes)}")
-            return cuentas_bd_pendientes
+                return cuentas_bd_pendientes
+
+            # ✅ PASO 3: Si NO hay pendientes, importar nuevas desde tabla
+            self._log("⚠️ No hay cuentas PENDIENTES en BD, importando desde tabla web")
+            cuentas_importadas = await self._obtener_cuentas_desde_tabla(100)  # Importar hasta 100
+
+            if cuentas_importadas:
+                self._log(f"📥 Importadas {len(cuentas_importadas)} cuentas nuevas como PENDIENTE")
+
+                # 🔥 CAMBIO AQUÍ: Buscar directamente en BD en lugar de recursión
+                with self.db_manager.get_connection() as conn:
+                    cursor = conn.execute("""
+                        SELECT idcuenta, proveedor, estado, valor_glosado, fecha_radicacion
+                        FROM cuenta_glosas_principal 
+                        WHERE estado = 'PENDIENTE'
+                        ORDER BY created_at ASC
+                        LIMIT 20
+                    """)
+
+                    nuevas_pendientes = []
+                    for row in cursor.fetchall():
+                        nuevas_pendientes.append({
+                            'idcuenta': row['idcuenta'],
+                            'proveedor': row['proveedor'],
+                            'estado': row['estado'],
+                            'valor_glosado': row['valor_glosado'],
+                            'fecha_radicacion': row['fecha_radicacion']
+                        })
+
+                    # Marcar como EN_PROCESO las recién importadas
+                    for cuenta in nuevas_pendientes:
+                        self.db_manager.update_cuenta_estado(
+                            cuenta['idcuenta'], 
+                            EstadoCuenta.EN_PROCESO,
+                            "Iniciando procesamiento automático"
+                        )
+
+                    return nuevas_pendientes
+            else:
+                self._log("❌ No se pudieron importar cuentas desde la tabla", "error")
+                return []
 
         except Exception as e:
             self._log(f"❌ Error obteniendo cuentas pendientes: {e}", "error")
             return []
     
-    async def _obtener_cuentas_desde_tabla(self, limite: int) -> List[Dict]:
-        """Obtiene cuentas directamente de la tabla visible y las guarda en BD con TODOS los datos."""
+    async def _obtener_cuentas_desde_tabla(self, limite: int = 100) -> List[Dict]:
+        """
+        Obtiene cuentas directamente de la tabla visible y las guarda en BD.
+        SIMPLIFICADO: Usa solo el método create_or_update_cuenta existente.
+        ✅ EMITE SEÑALES CUANDO TERMINA LA IMPORTACIÓN.
+        """
         try:
             cuentas = []
             filas = self.page.locator(self.selectores['filas_tabla_principal'])
             total_filas = await filas.count()
+            limite_real = min(total_filas, limite)
 
-            self._log(f"📊 Extrayendo máximo {limite} cuentas de {total_filas} filas disponibles")
+            self._log(f"📊 Extrayendo {limite_real} de {total_filas} filas")
 
-            for i in range(min(total_filas, limite)):
+            for i in range(limite_real):
                 try:
                     fila = filas.nth(i)
                     celdas = fila.locator("td")
                     total_celdas = await celdas.count()
 
-                    if total_celdas >= 8:  # Verificar que tiene todas las columnas
-                        # EXTRAER TODOS LOS DATOS según el HTML que enviaste
+                    if total_celdas >= 8:
+                        # Extraer datos de la tabla
                         idcuenta = await celdas.nth(0).text_content()
                         numero_radicacion = await celdas.nth(1).text_content()
                         fecha_radicacion = await celdas.nth(2).text_content()
@@ -307,41 +366,52 @@ class ProcesadorCompletoGlosasImplementado:
                         valor_factura_texto = await celdas.nth(6).text_content()
                         valor_glosado_texto = await celdas.nth(7).text_content()
 
-                        # Preparar datos COMPLETOS de la cuenta
+                        # Preparar datos
                         cuenta_data = {
                             'idcuenta': idcuenta.strip(),
                             'numero_radicacion': numero_radicacion.strip(),
                             'fecha_radicacion': fecha_radicacion.strip(),
-                            'proveedor': proveedor.strip()[:200],  # Permitir más caracteres
+                            'proveedor': proveedor.strip()[:200],
                             'numero_factura': numero_factura.strip(),
                             'fecha_factura': fecha_factura.strip(),
                             'valor_factura': self._parsear_moneda(valor_factura_texto),
                             'valor_glosado': self._parsear_moneda(valor_glosado_texto)
                         }
 
-                        # *** GUARDAR EN BASE DE DATOS ***
+                        # ✅ USAR SOLO EL MÉTODO ÚNICO
                         try:
-                            cuenta_bd_id = self.db_manager.create_or_update_cuenta(cuenta_data)
-                            self._log(f"✅ Cuenta {idcuenta} guardada completa en BD - ID: {cuenta_bd_id}")
-                            self._log(f"   📋 Proveedor: {proveedor[:30]}...")
-                            self._log(f"   💰 Valor Glosado: ${cuenta_data['valor_glosado']:,.2f}")
+                            if self.db_manager.should_process_cuenta(cuenta_data['idcuenta']):
+                                cuenta_bd_id = self.db_manager.create_or_update_cuenta(cuenta_data)
+                                cuenta_data['bd_id'] = cuenta_bd_id
+                                cuentas.append(cuenta_data)
 
-                            # Agregar ID de BD para referencia
-                            cuenta_data['bd_id'] = cuenta_bd_id
-                            cuentas.append(cuenta_data)
+                                if i % 10 == 0 or i < 10:
+                                    self._log(f"✅ Cuenta {cuenta_data['idcuenta']} guardada como PENDIENTE - ID: {cuenta_bd_id}")
+                            else:
+                                self._log(f"⏭️ Cuenta {cuenta_data['idcuenta']} saltada por estado")
 
                         except Exception as e:
-                            self._log(f"❌ Error guardando cuenta {idcuenta} en BD: {e}", "error")
-                            # Agregar sin ID de BD como fallback
+                            self._log(f"❌ Error guardando cuenta {cuenta_data['idcuenta']}: {e}", "error")
+                            # Agregar sin ID como fallback
                             cuentas.append(cuenta_data)
+
                     else:
                         self._log(f"⚠️ Fila {i} tiene solo {total_celdas} celdas, esperadas 8", "warning")
 
                 except Exception as e:
-                    self._log(f"⚠️ Error obteniendo cuenta en fila {i}: {e}", "warning")
+                    self._log(f"⚠️ Error en fila {i}: {e}", "warning")
                     continue
 
-            self._log(f"💾 Proceso completado: {len(cuentas)} cuentas extraídas con datos completos")
+            self._log(f"💾 IMPORTACIÓN COMPLETADA: {len(cuentas)} cuentas procesadas como PENDIENTE")
+
+            # ✅ EMITIR SEÑALES CUANDO TERMINA DE IMPORTAR
+            if self.worker and cuentas:
+                self.worker.emit_data_imported(len(cuentas))
+                self.worker.emit_tabla_refresh()
+
+                # Pequeña pausa para que la UI se actualice
+                await asyncio.sleep(1)
+
             return cuentas
 
         except Exception as e:
@@ -370,33 +440,55 @@ class ProcesadorCompletoGlosasImplementado:
     async def _procesar_cuenta_completa(self, idcuenta: str) -> Dict:
         """
         Procesa una cuenta completa: hacer clic, procesar todas las glosas, terminar.
-        
+        ✅ EMITE SEÑALES CUANDO CAMBIA EL ESTADO DE LA CUENTA.
+                 
         Args:
             idcuenta (str): ID de la cuenta a procesar
-            
+                     
         Returns:
             Dict: Resultado del procesamiento
         """
         try:
             self._log(f"🔄 Procesando cuenta completa: {idcuenta}")
-            
+                     
             # SUBPASO 1: Ir a tabla principal y hacer clic en la cuenta
             if not await self._navegar_y_hacer_clic_cuenta(idcuenta):
-                return {'exito': False, 'error': 'No se pudo hacer clic en la cuenta'}
-            
+                resultado_fallo = {'exito': False, 'error': 'No se pudo hacer clic en la cuenta'}
+                
+                # ✅ EMITIR SIGNAL DE ERROR
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
+                    self.worker.emit_tabla_refresh()
+                    
+                return resultado_fallo
+                     
             # SUBPASO 2: Procesar todas las glosas de la cuenta
             resultado_glosas = await self._procesar_todas_las_glosas_cuenta(idcuenta)
-            
+                     
             if not resultado_glosas['exito']:
-                return {
+                resultado_fallo = {
                     'exito': False, 
                     'error': f"Error procesando glosas: {resultado_glosas['error']}"
                 }
-            
+                
+                # ✅ EMITIR SIGNAL DE ERROR
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
+                    self.worker.emit_tabla_refresh()
+                    
+                return resultado_fallo
+                     
             # SUBPASO 3: Terminar la cuenta (botón verde)
             if not await self._terminar_cuenta():
-                return {'exito': False, 'error': 'No se pudo terminar la cuenta'}
-            
+                resultado_fallo = {'exito': False, 'error': 'No se pudo terminar la cuenta'}
+                
+                # ✅ EMITIR SIGNAL DE ERROR
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
+                    self.worker.emit_tabla_refresh()
+                    
+                return resultado_fallo
+                     
             # SUBPASO 4: Actualizar estado en BD
             self.db_manager.update_cuenta_estado(
                 idcuenta, 
@@ -404,19 +496,32 @@ class ProcesadorCompletoGlosasImplementado:
                 f"Procesada correctamente - {resultado_glosas['glosas_procesadas']} glosas"
             )
             
-            return {
+            # ✅ PREPARAR RESULTADO EXITOSO
+            resultado_exitoso = {
                 'exito': True,
                 'glosas_procesadas': resultado_glosas['glosas_procesadas'],
                 'glosas_fallidas': resultado_glosas['glosas_fallidas']
             }
             
+            # ✅ EMITIR SIGNAL DE ÉXITO
+            if self.worker:
+                self.worker.emit_cuenta_processed(idcuenta, 'COMPLETADO')
+                self.worker.emit_tabla_refresh()
+                     
+            return resultado_exitoso
+                     
         except Exception as e:
             error_msg = f"Error procesando cuenta completa {idcuenta}: {e}"
             self._log(error_msg, "error")
-            
+                     
             # Marcar como fallida en BD
             await self._marcar_cuenta_fallida(idcuenta, error_msg)
             
+            # ✅ EMITIR SIGNAL DE ERROR EN EXCEPCIÓN
+            if self.worker:
+                self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
+                self.worker.emit_tabla_refresh()
+                     
             return {'exito': False, 'error': error_msg}
     
     async def _procesar_glosa_individual(self, idcuenta: str, glosa_info: Dict) -> Dict:
@@ -1034,7 +1139,10 @@ class ProcesadorCompletoGlosasImplementado:
             self._log(f"❌ Error mostrando estadísticas: {e}", "error")
     
     async def _navegar_y_hacer_clic_cuenta(self, idcuenta: str) -> bool:
-        """Navega a tabla principal y hace clic en la cuenta."""
+        """
+        Navega a tabla principal y hace clic en la cuenta.
+        CORREGIDO: Busca la cuenta por ID dinámicamente en la tabla actual.
+        """
         try:
             self._log(f"🖱️ Navegando y haciendo clic en cuenta {idcuenta}")
             
@@ -1042,24 +1150,70 @@ class ProcesadorCompletoGlosasImplementado:
             if not await self._asegurar_tabla_principal():
                 return False
             
-            # Buscar y hacer clic en el botón de la cuenta
-            boton_cuenta = self.page.locator(f'button.btRespuestaStart[idcuenta="{idcuenta}"]')
+            # ✅ CORREGIDO: Buscar la cuenta dinámicamente en la tabla actual
+            # En lugar de usar un selector fijo, buscar por ID en todas las filas
             
-            if await boton_cuenta.count() == 0:
-                self._log(f"❌ No se encontró botón para cuenta {idcuenta}", "error")
-                return False
+            filas = self.page.locator(self.selectores['filas_tabla_principal'])
+            total_filas = await filas.count()
             
-            await boton_cuenta.scroll_into_view_if_needed()
-            await asyncio.sleep(1)
-            await boton_cuenta.click()
+            self._log(f"🔍 Buscando cuenta {idcuenta} en {total_filas} filas disponibles")
             
-            # Esperar a que cargue la página de glosas
-            await self.page.wait_for_load_state('networkidle', timeout=15000)
-            await asyncio.sleep(5)  # Espera específica mencionada
-            
-            self._log(f"✅ Clic exitoso en cuenta {idcuenta}")
-            return True
-            
+            for i in range(total_filas):
+                try:
+                    fila = filas.nth(i)
+                    celdas = fila.locator("td")
+                    
+                    # Obtener el ID de la primera celda
+                    if await celdas.count() > 0:
+                        id_celda = await celdas.nth(0).text_content()
+                        id_celda = id_celda.strip()
+                        
+                        if id_celda == idcuenta:
+                            self._log(f"✅ Cuenta {idcuenta} encontrada en fila {i}")
+                            
+                            # Buscar el botón dentro de esta fila
+                            boton_cuenta = fila.locator(self.selectores['boton_cuenta'])
+                            
+                            if await boton_cuenta.count() == 0:
+                                # Buscar botón con otros selectores posibles
+                                posibles_selectores = [
+                                    ".btRespuestaStart",
+                                    "button[onclick*='respuestaGlosastart']",
+                                    "button[class*='btn']",
+                                    "button"
+                                ]
+                                
+                                for selector in posibles_selectores:
+                                    boton_cuenta = fila.locator(selector)
+                                    if await boton_cuenta.count() > 0:
+                                        self._log(f"🔘 Botón encontrado con selector: {selector}")
+                                        break
+                                    
+                            if await boton_cuenta.count() == 0:
+                                self._log(f"❌ No se encontró botón en la fila de cuenta {idcuenta}", "error")
+                                return False
+                            
+                            # Hacer scroll al botón
+                            await boton_cuenta.first.scroll_into_view_if_needed()
+                            await asyncio.sleep(1)
+                            
+                            # Hacer clic
+                            await boton_cuenta.first.click()
+                            self._log(f"🖱️ Clic realizado en botón de cuenta {idcuenta}")
+                            
+                            # Esperar a que cargue la página de glosas
+                            await self.page.wait_for_load_state('networkidle', timeout=15000)
+                            await asyncio.sleep(5)  # Espera específica mencionada
+                            
+                            return True
+                            
+                except Exception as e:
+                    self._log(f"⚠️ Error verificando fila {i}: {e}", "warning")
+                    continue
+                
+            self._log(f"❌ Cuenta {idcuenta} no encontrada en la tabla actual", "error")
+            return False
+                
         except Exception as e:
             self._log(f"❌ Error navegando/haciendo clic cuenta {idcuenta}: {e}", "error")
             return False

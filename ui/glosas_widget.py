@@ -4,8 +4,11 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QGroupBox, QLineEdit, QLabel, QProgressBar,
                             QSplitter, QMessageBox, QTableWidget, QTableWidgetItem,
                             QHeaderView, QAbstractItemView)
-from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal
+from PySide6.QtCore import Qt, QThread, QTimer ,Signal as pyqtSignal
 from ui.components.log_widget import LogWidget
+
+
+
 
 # *** CAMBIO: Importar el nuevo automatizador de glosas ***
 from automation.web_scraper_glosas import WebScraperGlosas
@@ -348,11 +351,11 @@ class GlosasWidget(QWidget):
         self.refresh_button.clicked.connect(self.refresh_data)
         
     def start_automation(self):
-        """Inicia el proceso de automatización de glosas."""
+        """Inicia el proceso de automatización de glosas CON SIGNALS EN TIEMPO REAL."""
         # Validar credenciales
         username = self.username_input.text().strip()
         password = self.password_input.text().strip()
-        
+
         if not username or not password:
             QMessageBox.warning(
                 self, 
@@ -360,21 +363,108 @@ class GlosasWidget(QWidget):
                 "Por favor ingrese usuario y contraseña."
             )
             return
-        
-        self.logger.info("Iniciando proceso de automatización de glosas desde UI")
-        
+
+        self.logger.info("Iniciando proceso de automatización de glosas CON SIGNALS EN TIEMPO REAL")
+
         # Actualizar estado de la UI
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Progreso indeterminado
         self.status_label.setText("Ejecutando automatización de glosas...")
-        
-        # Crear y iniciar worker
-        self.automation_worker = AutomationWorker(username, password)
+
+        # Crear y iniciar worker CON SIGNALS
+        self.automation_worker = GlosasAutomationWorker(username, password)
+
+        # ✅ CONECTAR SIGNALS ORIGINALES
         self.automation_worker.automation_finished.connect(self.on_automation_finished)
         self.automation_worker.progress_updated.connect(self.on_progress_updated)
+
+        # ✅ CONECTAR NUEVOS SIGNALS PARA TIEMPO REAL
+        self.automation_worker.data_imported.connect(self.on_data_imported)
+        self.automation_worker.cuenta_processed.connect(self.on_cuenta_processed)
+        self.automation_worker.tabla_refresh_needed.connect(self.on_tabla_refresh_needed)
+
         self.automation_worker.start()
+    # ✅ NUEVOS MÉTODOS PARA MANEJAR SIGNALS EN TIEMPO REAL
+    def on_data_imported(self, cantidad: int):
+        """Se ejecuta cuando se importan datos - ACTUALIZACIÓN INMEDIATA."""
+        self.logger.info(f"📊 Signal recibido: Importadas {cantidad} cuentas nuevas")
+
+        # Actualizar estadísticas inmediatamente
+        self.update_stats()
+
+        # Actualizar tabla inmediatamente
+        self.stats_table.load_data()
+
+        # Mostrar mensaje en status
+        self.status_label.setText(f"✅ Importadas {cantidad} cuentas nuevas - Iniciando procesamiento...")
+    def on_tabla_refresh_needed(self):
+        """Se ejecuta cuando necesita refrescar toda la interfaz."""
+        self.logger.info("📊 Signal recibido: Refrescando interfaz completa")
+
+        # Actualizar tabla completa
+        self.stats_table.load_data()
+
+        # Actualizar estadísticas
+        self.update_stats()
+
+        # Log para confirmar actualización
+        self.logger.info("🔄 Interfaz actualizada automáticamente en tiempo real")
+
+    def on_cuenta_processed(self, idcuenta: str, estado: str):
+        """Se ejecuta cuando se procesa una cuenta - ACTUALIZACIÓN EN TIEMPO REAL."""
+        emoji = "✅" if estado == "COMPLETADO" else "❌"
+        self.logger.info(f"📊 Signal recibido: {emoji} Cuenta {idcuenta} -> {estado}")
+
+        # Actualizar estadísticas en tiempo real
+        self.update_stats()
+
+        # Actualizar mensaje de estado con progreso
+        total_procesadas = self.get_total_procesadas()
+        total_pendientes = self.get_total_pendientes()
+
+        self.status_label.setText(f"🔄 Procesando glosas... (✅{total_procesadas} completadas, ⏳{total_pendientes} pendientes)")
+    def get_total_procesadas(self) -> int:
+        """Obtiene total de cuentas procesadas desde BD."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as count 
+                    FROM cuenta_glosas_principal 
+                    WHERE estado = 'COMPLETADO'
+                """)
+                result = cursor.fetchone()
+                return result['count'] if result else 0
+        except Exception:
+            return 0
+    def get_total_pendientes(self) -> int:
+        """Obtiene total de cuentas pendientes desde BD."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as count 
+                    FROM cuenta_glosas_principal 
+                    WHERE estado = 'PENDIENTE'
+                """)
+                result = cursor.fetchone()
+                return result['count'] if result else 0
+        except Exception:
+            return 0
+
+    def get_total_en_proceso(self) -> int:
+        """Obtiene total de cuentas en proceso desde BD."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as count 
+                    FROM cuenta_glosas_principal 
+                    WHERE estado = 'EN_PROCESO'
+                """)
+                result = cursor.fetchone()
+                return result['count'] if result else 0
+        except Exception:
+            return 0
         
     def stop_automation(self):
         """Detiene el proceso de automatización."""
@@ -386,25 +476,33 @@ class GlosasWidget(QWidget):
         self.reset_ui_state()
         
     def on_automation_finished(self, success: bool):
-        """Maneja la finalización de la automatización."""
+        """Maneja la finalización de la automatización CON ACTUALIZACIÓN FINAL."""
         self.reset_ui_state()
         
+        # Obtener estadísticas finales
+        total_completadas = self.get_total_procesadas()
+        total_pendientes = self.get_total_pendientes()
+        total_en_proceso = self.get_total_en_proceso()
+        
         if success:
-            self.status_label.setText("Automatización de glosas completada exitosamente")
+            self.status_label.setText(f"✅ Automatización completada - {total_completadas} cuentas procesadas")
             QMessageBox.information(
                 self,
                 "Automatización Exitosa",
-                "El proceso de automatización de glosas se completó correctamente."
+                f"El proceso de automatización se completó correctamente.\n\n"
+                f"✅ Completadas: {total_completadas}\n"
+                f"⏳ Pendientes: {total_pendientes}\n"
+                f"🔄 En proceso: {total_en_proceso}"
             )
         else:
-            self.status_label.setText("Error en automatización de glosas")
+            self.status_label.setText("❌ Error en automatización de glosas")
             QMessageBox.critical(
                 self,
                 "Error en Automatización",
                 "El proceso de automatización de glosas falló. Revise los logs para más detalles."
             )
         
-        # *** NUEVO: Actualizar datos después de la automatización ***
+        # ✅ ACTUALIZACIÓN FINAL GARANTIZADA
         self.refresh_data()
     
     def on_progress_updated(self, value: int):
@@ -427,42 +525,113 @@ class GlosasWidget(QWidget):
         self.logger.info("Datos de interfaz actualizados")
     
     def update_stats(self):
-        """*** NUEVO: Actualiza las estadísticas mostradas ***"""
+        """Actualiza las estadísticas mostradas (OPTIMIZADO PARA TIEMPO REAL)."""
         try:
             with self.db_manager.get_connection() as conn:
-                # Obtener estadísticas por estado
+                # Una sola consulta optimizada
                 cursor = conn.execute("""
-                    SELECT estado, COUNT(*) as count 
+                    SELECT 
+                        estado,
+                        COUNT(*) as count,
+                        SUM(COALESCE(glosas_procesadas, 0)) as total_glosas
                     FROM cuenta_glosas_principal 
                     GROUP BY estado
-                """)
-                
-                stats = {}
-                for row in cursor.fetchall():
-                    stats[row['estado'].lower()] = row['count']
-                
-                # Obtener total de glosas procesadas
-                cursor = conn.execute("""
-                    SELECT COUNT(*) as count 
+
+                    UNION ALL
+
+                    SELECT 
+                        'GLOSAS_DETALLE' as estado,
+                        COUNT(*) as count,
+                        0 as total_glosas
                     FROM glosa_items_detalle 
                     WHERE fue_procesado = 1
                 """)
-                
-                glosas_row = cursor.fetchone()
-                glosas_procesadas = glosas_row['count'] if glosas_row else 0
-                
-                # Actualizar etiquetas
-                self.stats_labels['pendientes'].setText(f"Pendientes: {stats.get('pendiente', 0)}")
-                self.stats_labels['en_proceso'].setText(f"En Proceso: {stats.get('en_proceso', 0)}")
-                self.stats_labels['completadas'].setText(f"Completadas: {stats.get('completado', 0)}")
-                self.stats_labels['fallidas'].setText(f"Fallidas: {stats.get('fallido', 0)}")
-                self.stats_labels['glosas_procesadas'].setText(f"Glosas Procesadas: {glosas_procesadas}")
-                
+
+                stats = {'pendiente': 0, 'en_proceso': 0, 'completado': 0, 'fallido': 0}
+                total_glosas_principales = 0
+                total_glosas_detalle = 0
+
+                for row in cursor.fetchall():
+                    estado_key = row['estado'].lower()
+                    if estado_key in stats:
+                        stats[estado_key] = row['count']
+                        total_glosas_principales += row['total_glosas'] or 0
+                    elif estado_key == 'glosas_detalle':
+                        total_glosas_detalle = row['count']
+
+                # Usar el mayor entre glosas principales y detalle
+                total_glosas_final = max(total_glosas_principales, total_glosas_detalle)
+
+                # Actualizar labels con animación visual
+                self.stats_labels['pendientes'].setText(f"Pendientes: {stats['pendiente']}")
+                self.stats_labels['en_proceso'].setText(f"En Proceso: {stats['en_proceso']}")
+                self.stats_labels['completadas'].setText(f"Completadas: {stats['completado']}")
+                self.stats_labels['fallidas'].setText(f"Fallidas: {stats['fallido']}")
+                self.stats_labels['glosas_procesadas'].setText(f"Glosas Procesadas: {total_glosas_final}")
+
+                # ✅ EFECTO VISUAL DE ACTUALIZACIÓN (opcional)
+                for label in self.stats_labels.values():
+                    label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px; background-color: #e8f5e8;")
+                    # Restaurar estilo normal después de 1 segundo
+                    QTimer.singleShot(1000, lambda l=label: l.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px;"))
+
         except Exception as e:
             self.logger.error(f"Error actualizando estadísticas: {e}")
-            # Si hay error, mostrar valores por defecto
-            for label in self.stats_labels.values():
-                if ":" not in label.text():
-                    continue
-                prefix = label.text().split(":")[0]
-                label.setText(f"{prefix}: 0")
+            # Si hay error, mantener valores actuales sin cambiar
+class GlosasAutomationWorker(QThread):
+    """
+    Worker thread para ejecutar automatización de glosas sin bloquear la UI.
+    MODIFICADO: Con signals para actualización en tiempo real.
+    """
+    
+    # Señales para comunicación con la UI
+    automation_finished = pyqtSignal(bool)
+    progress_updated = pyqtSignal(int)
+    stats_updated = pyqtSignal(dict)
+    
+    # ✅ NUEVAS SEÑALES PARA TIEMPO REAL
+    data_imported = pyqtSignal(int)  # Cuando importa datos (cantidad)
+    cuenta_processed = pyqtSignal(str, str)  # Cuando procesa una cuenta (id, estado)
+    tabla_refresh_needed = pyqtSignal()  # Cuando necesita refrescar tabla
+    
+    def __init__(self, username: str, password: str):
+        super().__init__()
+        self.username = username
+        self.password = password
+        self.logger = logging.getLogger(__name__)
+        
+    def run(self):
+        """Ejecuta la automatización de glosas en el hilo de trabajo."""
+        try:
+            self.logger.info("Iniciando worker de automatización de glosas CON SIGNALS")
+            
+            # Ejecutar automatización de glosas
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # ✅ MODIFICADO: Pasar SELF al scraper para que pueda emitir signals
+            scraper = WebScraperGlosas(worker_thread=self)
+            success = loop.run_until_complete(
+                scraper.start_glosas_automation(self.username, self.password)
+            )
+            
+            loop.close()
+            
+            self.automation_finished.emit(success)
+            
+        except Exception as e:
+            self.logger.error(f"Error en worker de automatización de glosas: {e}")
+            self.automation_finished.emit(False)
+    
+    # ✅ NUEVOS MÉTODOS PARA EMITIR SIGNALS
+    def emit_data_imported(self, cantidad: int):
+        """Emite signal cuando se importan datos."""
+        self.data_imported.emit(cantidad)
+    
+    def emit_cuenta_processed(self, idcuenta: str, estado: str):
+        """Emite signal cuando se procesa una cuenta."""
+        self.cuenta_processed.emit(idcuenta, estado)
+    
+    def emit_tabla_refresh(self):
+        """Emite signal para refrescar tabla."""
+        self.tabla_refresh_needed.emit()
