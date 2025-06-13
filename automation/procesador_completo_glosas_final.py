@@ -639,24 +639,23 @@ class ProcesadorCompletoGlosasImplementado:
             return {'exito': False, 'error': error_msg}
     async def _guardar_glosas_sin_configuracion(self, idcuenta: str, glosas_sin_config: List[Dict]):
         """
-        ➕ MÉTODO NUEVO - Agregar al final de la clase
-        Guarda en BD las glosas que no tienen configuración disponible.
+        ✅ CORREGIDO: Usar nombres correctos de campos
         """
         try:
             self._log(f"💾 Guardando {len(glosas_sin_config)} glosas sin configuración en BD")
 
             with self.db_manager.get_connection() as conn:
                 for glosa in glosas_sin_config:
-                    # Insertar o actualizar glosa en detalle
+                    # ✅ CORREGIR: Usar nombres correctos de campos extraídos
                     conn.execute("""
                         INSERT OR REPLACE INTO glosa_items_detalle 
                         (idglosa, idcuenta, codigo_glosa, descripcion_glosa, estado, motivo_fallo, fecha_procesamiento)
                         VALUES (?, ?, ?, ?, 'SIN_CONFIGURACION', 'No se encontró configuración para esta glosa', CURRENT_TIMESTAMP)
                     """, (
-                        glosa['idglosa'],
+                        glosa['id_glosa'],  # ✅ CORREGIR: campo correcto
                         idcuenta,
-                        glosa.get('codigo_glosa', ''),
-                        glosa.get('descripcion', ''),
+                        glosa.get('tipo', ''),  # ✅ CORREGIR: campo correcto
+                        glosa.get('justificacion', ''),  # ✅ CORREGIR: campo correcto
                     ))
 
                 conn.commit()
@@ -664,81 +663,81 @@ class ProcesadorCompletoGlosasImplementado:
 
         except Exception as e:
             self._log(f"❌ Error guardando glosas sin configuración: {e}", "error")
-    
+        
     async def _procesar_glosa_individual(self, glosa_info: Dict) -> Dict:
-            """
-            MEJORADO: Procesa una glosa individual con mejor manejo de modales.
+        """
+        MEJORADO: Procesa una glosa individual con mejor manejo de modales.
+        
+        Args:
+            glosa_info (Dict): Información de la glosa (no necesita idcuenta separado)
             
-            Args:
-                glosa_info (Dict): Información de la glosa (no necesita idcuenta separado)
+        Returns:
+            Dict: Resultado del procesamiento
+        """
+        try:
+            id_glosa = glosa_info.get('id_glosa', '')
+            tipo = glosa_info.get('tipo', '')
+            justificacion = glosa_info.get('justificacion', '')
+            
+            self._log(f"🔍 Procesando glosa individual {id_glosa} - Tipo: {tipo}")
+            
+            # PASO 1: Hacer clic en botón de la glosa
+            if not await self._hacer_clic_boton_glosa(id_glosa):
+                return {'exito': False, 'error': 'No se pudo hacer clic en botón de glosa'}
+            
+            # PASO 2: Esperar que el modal se abra
+            if not await self._esperar_modal_abierto(id_glosa):
+                return {'exito': False, 'error': 'Modal no se abrió correctamente'}
+            
+            # ✅ PASO 3: ÚNICA LÍNEA A CAMBIAR - Usar método que SÍ existe
+            configuracion = self._buscar_configuracion_glosa(tipo, justificacion)
+            
+            if not configuracion:
+                self._log(f"⚠️ Sin configuración para glosa {id_glosa} - Cerrando modal...")
                 
-            Returns:
-                Dict: Resultado del procesamiento
-            """
-            try:
-                id_glosa = glosa_info.get('id_glosa', '')
-                tipo = glosa_info.get('tipo', '')
-                justificacion = glosa_info.get('justificacion', '')
-                
-                self._log(f"🔍 Procesando glosa individual {id_glosa} - Tipo: {tipo}")
-                
-                # PASO 1: Hacer clic en botón de la glosa
-                if not await self._hacer_clic_boton_glosa(id_glosa):
-                    return {'exito': False, 'error': 'No se pudo hacer clic en botón de glosa'}
-                
-                # PASO 2: Esperar que el modal se abra
-                if not await self._esperar_modal_abierto(id_glosa):
-                    return {'exito': False, 'error': 'Modal no se abrió correctamente'}
-                
-                # PASO 3: Buscar configuración para esta glosa
-                configuracion = self._obtener_configuracion_glosa(tipo, justificacion)
-                
-                if not configuracion:
-                    self._log(f"⚠️ Sin configuración para glosa {id_glosa} - Cerrando modal...")
-                    
-                    # ✅ MEJORADO: Cerrar modal y continuar sin marcas de error
-                    modal_cerrado = await self._cerrar_modal()
-                    if not modal_cerrado:
-                        self._log(f"❌ Error cerrando modal para glosa {id_glosa}", "error")
-                        # Intentar forzar el cierre navegando
-                        try:
-                            await self.page.keyboard.press('Escape')
-                            await asyncio.sleep(1)
-                            await self.page.keyboard.press('Escape')
-                            await asyncio.sleep(1)
-                        except:
-                            pass
+                # ✅ MEJORADO: Cerrar modal y continuar sin marcas de error
+                modal_cerrado = await self._cerrar_modal()
+                if not modal_cerrado:
+                    self._log(f"❌ Error cerrando modal para glosa {id_glosa}", "error")
+                    # Intentar forzar el cierre navegando
+                    try:
+                        await self.page.keyboard.press('Escape')
+                        await asyncio.sleep(1)
+                        await self.page.keyboard.press('Escape') 
+                        await asyncio.sleep(1)
+                    except:
+                        pass
                         
-                    return {'exito': False, 'error': 'Sin configuración disponible', 'sin_config': True}
-                
-                # PASO 4: Llenar campos del modal
-                if not await self._llenar_modal_respuesta(configuracion):
-                    await self._cerrar_modal()
-                    return {'exito': False, 'error': 'Error llenando campos del modal'}
-                
-                # PASO 5: Guardar respuesta
-                if not await self._guardar_respuesta_modal():
-                    await self._cerrar_modal()
-                    return {'exito': False, 'error': 'Error guardando respuesta'}
-                
-                # PASO 6: Esperar que se procese y se cierre el modal automáticamente
-                await asyncio.sleep(3)  # Reducido de 5 a 3 segundos
-                
-                self._log(f"✅ Glosa {id_glosa} procesada exitosamente")
-                
-                return {'exito': True, 'configuracion_usada': configuracion['tipo']}
-                
-            except Exception as e:
-                error_msg = f"Error procesando glosa individual {glosa_info.get('id_glosa', 'N/A')}: {e}"
-                self._log(error_msg, "error")
-                
-                # Intentar cerrar modal en caso de error
-                try:
-                    await self._cerrar_modal()
-                except:
-                    pass
-                
-                return {'exito': False, 'error': error_msg}
+                return {'exito': False, 'error': 'Sin configuración disponible', 'sin_config': True}
+            
+            # PASO 4: Llenar campos del modal
+            if not await self._llenar_modal_respuesta(configuracion):
+                await self._cerrar_modal()
+                return {'exito': False, 'error': 'Error llenando campos del modal'}
+            
+            # PASO 5: Guardar respuesta
+            if not await self._guardar_respuesta_modal():
+                await self._cerrar_modal()
+                return {'exito': False, 'error': 'Error guardando respuesta'}
+            
+            # PASO 6: Esperar que se procese y se cierre el modal automáticamente
+            await asyncio.sleep(3)  # Reducido de 5 a 3 segundos
+            
+            self._log(f"✅ Glosa {id_glosa} procesada exitosamente")
+            
+            return {'exito': True, 'configuracion_usada': configuracion['tipo']}
+            
+        except Exception as e:
+            error_msg = f"Error procesando glosa individual {glosa_info.get('id_glosa', 'N/A')}: {e}"
+            self._log(error_msg, "error")
+            
+            # Intentar cerrar modal en caso de error
+            try:
+                await self._cerrar_modal()
+            except:
+                pass
+            
+            return {'exito': False, 'error': error_msg}
     
     async def _hacer_clic_boton_glosa(self, id_glosa: str) -> bool:
         """Hace clic en el botón de una glosa específica."""
@@ -1539,93 +1538,119 @@ class ProcesadorCompletoGlosasImplementado:
 
     async def _procesar_todas_las_glosas_cuenta(self, idcuenta: str) -> Dict:
         """
-        Procesa todas las glosas de una cuenta específica.
-        MEJORADO: Mejor manejo de errores con marcado como FALLIDO.
+        ✅ CORREGIDO: Usar nombres correctos de métodos y campos
         """
         try:
             self._log(f"📋 Procesando todas las glosas de cuenta {idcuenta}")
-
-            # Hacer scroll hasta la tabla de glosas
-            await self._scroll_hasta_tabla_glosas()
-
-            # Extraer información de todas las glosas
-            glosas_info = await self._extraer_glosas_de_tabla()
-
-            if not glosas_info:
-                # ✅ NUEVO: Marcar como FALLIDO si no hay glosas
-                error_msg = "No se encontraron glosas en la tabla"
-                await self._marcar_cuenta_fallida(idcuenta, error_msg)
-                return {'exito': False, 'error': error_msg}
-
-            self._log(f"📊 Encontradas {len(glosas_info)} glosas para procesar")
-
-            # Guardar todas las glosas en glosa_items_detalle
-            cuenta_id = await self._obtener_cuenta_id(idcuenta)
-            if cuenta_id:
-                for glosa in glosas_info:
-                    self._guardar_glosa_en_detalle(cuenta_id, glosa)
-
-            glosas_procesadas = 0
-            glosas_fallidas = 0
-
-            # Procesar cada glosa individual
-            for i, glosa_info in enumerate(glosas_info):
-                id_glosa = glosa_info['id_glosa']
-                estado = glosa_info['estado']
-
-                self._log(f"   🔄 Procesando glosa {i+1}/{len(glosas_info)}: {id_glosa}")
-
-                # Saltar si ya está procesada
-                if estado.upper() == "RESPODIDA":
-                    self._log(f"   ⏭️ Glosa {id_glosa} ya procesada, saltando")
-                    continue
-                
-                try:
-                    # Procesar glosa individual
-                    resultado = await self._procesar_glosa_individual(idcuenta, glosa_info)
-
-                    if resultado['exito']:
-                        glosas_procesadas += 1
-                        self._log(f"   ✅ Glosa {id_glosa} procesada")
-                    else:
+    
+            # PASO 1: Extraer glosas
+            if not await self._hacer_scroll_hasta_tabla_glosas():
+                return {'exito': False, 'error': 'No se pudo hacer scroll hasta tabla de glosas'}
+    
+            glosas_extraidas = await self._extraer_glosas_de_tabla()
+    
+            if not glosas_extraidas:
+                return {'exito': False, 'error': 'No se encontraron glosas para procesar'}
+    
+            self._log(f"📊 Encontradas {len(glosas_extraidas)} glosas para procesar")
+    
+            # ✅ PASO 2 CORREGIDO: Verificar configuraciones usando método correcto
+            glosas_con_config = []
+            glosas_sin_config = []
+    
+            for glosa in glosas_extraidas:
+                # ✅ CORREGIR: Usar nombres correctos de campos extraídos
+                tipo_glosa = glosa.get('tipo', '')
+                justificacion_glosa = glosa.get('justificacion', '')
+    
+                # ✅ CORREGIR: Usar método que SÍ existe
+                configuracion = self._buscar_configuracion_glosa(tipo_glosa, justificacion_glosa)
+    
+                if configuracion:
+                    glosa['configuracion'] = configuracion
+                    glosas_con_config.append(glosa)
+                    self._log(f"   ✅ Glosa {glosa['id_glosa']}: Configuración encontrada")
+                else:
+                    glosas_sin_config.append(glosa)
+                    self._log(f"   ❌ Glosa {glosa['id_glosa']}: SIN configuración para {tipo_glosa}")
+    
+            # PASO 3: Si hay glosas sin configuración, manejar correctamente
+            if glosas_sin_config:
+                self._log(f"⚠️ {len(glosas_sin_config)} glosas sin configuración - Guardando en BD")
+                await self._guardar_glosas_sin_configuracion(idcuenta, glosas_sin_config)
+    
+                if not glosas_con_config:
+                    return {
+                        'exito': False, 
+                        'error': f"Todas las glosas ({len(glosas_sin_config)}) sin configuración",
+                        'glosas_sin_config': len(glosas_sin_config)
+                    }
+    
+            # ✅ PASO 4 CORREGIDO: Procesar solo las glosas CON configuración
+            if glosas_con_config:
+                self._log(f"🚀 Procesando {len(glosas_con_config)} glosas con configuración")
+    
+                glosas_procesadas = 0
+                glosas_fallidas = 0
+    
+                for i, glosa in enumerate(glosas_con_config):
+                    self._log(f"   🔄 Procesando glosa {i+1}/{len(glosas_con_config)}: {glosa['id_glosa']}")
+    
+                    try:
+                        # ✅ CORREGIR: Usar método con parámetro correcto
+                        resultado = await self._procesar_glosa_individual(glosa)
+    
+                        if resultado['exito']:
+                            glosas_procesadas += 1
+                            self._log(f"   ✅ Glosa {glosa['id_glosa']} procesada exitosamente")
+                        else:
+                            glosas_fallidas += 1
+                            self._log(f"   ❌ Glosa {glosa['id_glosa']} falló: {resultado.get('error', '')}")
+    
+                    except Exception as e:
                         glosas_fallidas += 1
-                        self._log(f"   ❌ Glosa {id_glosa} falló: {resultado['error']}")
-
-                        # Guardar glosa fallida en BD
-                        await self._guardar_glosa_fallida(idcuenta, glosa_info, resultado['error'])
-
-                except Exception as e:
-                    error_msg = f"Error procesando glosa {id_glosa}: {e}"
-                    self._log(f"   ❌ {error_msg}", "error")
-                    glosas_fallidas += 1
-                    await self._guardar_glosa_fallida(idcuenta, glosa_info, error_msg)
-
-                # Pausa entre glosas
-                await asyncio.sleep(2)
-
-            self._log(f"📊 Glosas procesadas: {glosas_procesadas}, fallidas: {glosas_fallidas}")
-
-            # ✅ NUEVO: Si TODAS las glosas fallaron, marcar cuenta como FALLIDO
-            if glosas_procesadas == 0 and glosas_fallidas > 0:
-                error_msg = f"Todas las glosas fallaron - Procesadas: 0, Fallidas: {glosas_fallidas}"
-                await self._marcar_cuenta_fallida(idcuenta, error_msg)
-                return {'exito': False, 'error': error_msg}
-
-            # ✅ MEJORADO: Éxito si al menos una glosa se procesó
-            return {
-                'exito': True,
-                'glosas_procesadas': glosas_procesadas,
-                'glosas_fallidas': glosas_fallidas
-            }
-
+                        self._log(f"   ❌ Error procesando glosa {glosa['id_glosa']}: {e}", "error")
+    
+                    await asyncio.sleep(2)
+    
+                return {
+                    'exito': True,
+                    'glosas_procesadas': glosas_procesadas,
+                    'glosas_fallidas': glosas_fallidas,
+                    'glosas_sin_config': len(glosas_sin_config) if glosas_sin_config else 0
+                }
+    
+            return {'exito': False, 'error': 'No hay glosas procesables'}
+    
         except Exception as e:
             error_msg = f"Error procesando glosas de cuenta {idcuenta}: {e}"
             self._log(error_msg, "error")
-
-            # ✅ NUEVO: Marcar como FALLIDO en caso de excepción general
-            await self._marcar_cuenta_fallida(idcuenta, error_msg)
             return {'exito': False, 'error': error_msg}
 
+    async def _hacer_scroll_hasta_tabla_glosas(self) -> bool:
+        """
+        ✅ MÉTODO FALTANTE AGREGADO
+        Hace scroll hasta la tabla de glosas.
+        """
+        try:
+            # Buscar la tabla de glosas y hacer scroll
+            tabla_glosas = self.page.locator(self.selectores['tabla_glosas'])
+
+            if await tabla_glosas.count() > 0:
+                await tabla_glosas.scroll_into_view_if_needed()
+                await asyncio.sleep(2)
+                self._log("✅ Scroll hasta tabla de glosas realizado")
+                return True
+            else:
+                # Hacer scroll general hacia abajo
+                await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.7)")
+                await asyncio.sleep(3)
+                self._log("✅ Scroll general realizado")
+                return True
+
+        except Exception as e:
+            self._log(f"⚠️ Error haciendo scroll: {e}", "warning")
+            return False
 
     def _guardar_glosa_en_detalle(self, cuenta_id: int, glosa_info: Dict):
         """
