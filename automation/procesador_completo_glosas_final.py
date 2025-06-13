@@ -264,7 +264,7 @@ class ProcesadorCompletoGlosasImplementado:
                         FROM cuenta_glosas_principal 
                         WHERE estado = 'PENDIENTE'
                         ORDER BY created_at ASC
-                        LIMIT 20
+                        
                     """)
 
                     for row in cursor.fetchall():
@@ -432,114 +432,128 @@ class ProcesadorCompletoGlosasImplementado:
             self._log(f"⚠️ Error parseando moneda '{valor}': {e}", "warning")
             return 0.0
 
-    async def _procesar_cuenta_completa(self, idcuenta: str) -> Dict:
+    async def _procesar_todas_las_glosas_cuenta(self, idcuenta: str) -> Dict:
         """
-        Procesa una cuenta completa: hacer clic, procesar todas las glosas, terminar.
-        ✅ CORREGIDO: Marca como EN_PROCESO justo antes de procesar y maneja todos los errores correctamente.
-
-        Args:
-            idcuenta (str): ID de la cuenta a procesar
-
-        Returns:
-            Dict: Resultado del procesamiento
+        ✅ MODIFICAR ESTE MÉTODO (no _procesar_cuenta_completa)
+        Procesa todas las glosas de una cuenta con verificación previa de configuraciones.
         """
         try:
-            self._log(f"🔄 Procesando cuenta completa: {idcuenta}")
+            self._log(f"📋 Procesando todas las glosas de cuenta {idcuenta}")
 
-            # ✅ NUEVO: Marcar como EN_PROCESO justo antes de procesar
-            self.db_manager.update_cuenta_estado(
-                idcuenta, 
-                EstadoCuenta.EN_PROCESO,
-                "Iniciando procesamiento automático"
-            )
-            self._log(f"🔄 Cuenta {idcuenta} marcada como EN_PROCESO")
+            # PASO 1: Extraer glosas (código existente)
+            if not await self._hacer_scroll_hasta_tabla_glosas():
+                return {'exito': False, 'error': 'No se pudo hacer scroll hasta tabla de glosas'}
 
-            # ✅ EMITIR SIGNAL DE CAMBIO DE ESTADO
-            if self.worker:
-                self.worker.emit_cuenta_processed(idcuenta, 'EN_PROCESO')
+            glosas_extraidas = await self._extraer_glosas_de_tabla()
 
-            # SUBPASO 1: Ir a tabla principal y hacer clic en la cuenta
-            if not await self._navegar_y_hacer_clic_cuenta(idcuenta):
-                resultado_fallo = {'exito': False, 'error': 'No se pudo hacer clic en la cuenta'}
+            if not glosas_extraidas:
+                return {'exito': False, 'error': 'No se encontraron glosas para procesar'}
 
-                # ✅ MARCAR COMO FALLIDO si no se puede hacer clic
-                await self._marcar_cuenta_fallida(idcuenta, "No se pudo hacer clic en la cuenta")
+            self._log(f"📊 Encontradas {len(glosas_extraidas)} glosas para procesar")
 
-                # ✅ EMITIR SIGNAL DE ERROR
-                if self.worker:
-                    self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
-                    self.worker.emit_tabla_refresh()
+            # ✅ PASO 2 NUEVO: Verificar configuraciones ANTES de procesar
+            glosas_con_config = []
+            glosas_sin_config = []
 
-                return resultado_fallo
+            for glosa in glosas_extraidas:
+                codigo_glosa = glosa.get('codigo_glosa', '')
+                descripcion = glosa.get('descripcion', '')
 
-            # SUBPASO 2: Procesar todas las glosas de la cuenta
-            resultado_glosas = await self._procesar_todas_las_glosas_cuenta(idcuenta)
+                # Buscar configuración usando tu método existente
+                configuracion = self._obtener_configuracion_glosa(codigo_glosa, descripcion)
 
-            if not resultado_glosas['exito']:
-                resultado_fallo = {
-                    'exito': False,
-                    'error': f"Error procesando glosas: {resultado_glosas['error']}"
+                if configuracion:
+                    glosa['configuracion'] = configuracion
+                    glosas_con_config.append(glosa)
+                    self._log(f"   ✅ Glosa {glosa['idglosa']}: Configuración encontrada")
+                else:
+                    glosas_sin_config.append(glosa)
+                    self._log(f"   ❌ Glosa {glosa['idglosa']}: SIN configuración para {codigo_glosa}")
+
+            # ✅ PASO 3 NUEVO: Si hay glosas sin configuración, manejar correctamente
+            if glosas_sin_config:
+                self._log(f"⚠️ {len(glosas_sin_config)} glosas sin configuración - Guardando en BD")
+
+                # Guardar glosas sin configuración
+                await self._guardar_glosas_sin_configuracion(idcuenta, glosas_sin_config)
+
+                # Si NO hay glosas procesables, es un fallo total
+                if not glosas_con_config:
+                    return {
+                        'exito': False, 
+                        'error': f"Todas las glosas ({len(glosas_sin_config)}) sin configuración",
+                        'glosas_sin_config': len(glosas_sin_config)
+                    }
+
+            # ✅ PASO 4: Procesar solo las glosas CON configuración (código existente mejorado)
+            if glosas_con_config:
+                self._log(f"🚀 Procesando {len(glosas_con_config)} glosas con configuración")
+
+                glosas_procesadas = 0
+                glosas_fallidas = 0
+
+                for i, glosa in enumerate(glosas_con_config):
+                    self._log(f"   🔄 Procesando glosa {i+1}/{len(glosas_con_config)}: {glosa['idglosa']}")
+
+                    try:
+                        # Usar tu método existente
+                        resultado = await self._procesar_glosa_individual(glosa)
+
+                        if resultado['exito']:
+                            glosas_procesadas += 1
+                            self._log(f"   ✅ Glosa {glosa['idglosa']} procesada exitosamente")
+                        else:
+                            glosas_fallidas += 1
+                            self._log(f"   ❌ Glosa {glosa['idglosa']} falló: {resultado.get('error', '')}")
+
+                    except Exception as e:
+                        glosas_fallidas += 1
+                        self._log(f"   ❌ Error procesando glosa {glosa['idglosa']}: {e}", "error")
+
+                    # Pausa entre glosas (mantener tu lógica)
+                    await asyncio.sleep(2)
+
+                # ✅ RESULTADO: Incluir información de glosas sin configuración
+                return {
+                    'exito': True,
+                    'glosas_procesadas': glosas_procesadas,
+                    'glosas_fallidas': glosas_fallidas,
+                    'glosas_sin_config': len(glosas_sin_config) if glosas_sin_config else 0
                 }
 
-                # ✅ MARCAR COMO FALLIDO si fallan las glosas
-                await self._marcar_cuenta_fallida(idcuenta, f"Error procesando glosas: {resultado_glosas['error']}")
-
-                # ✅ EMITIR SIGNAL DE ERROR
-                if self.worker:
-                    self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
-                    self.worker.emit_tabla_refresh()
-
-                return resultado_fallo
-
-            # SUBPASO 3: Terminar la cuenta (botón verde)
-            if not await self._terminar_cuenta():
-                resultado_fallo = {'exito': False, 'error': 'No se pudo terminar la cuenta'}
-
-                # ✅ MARCAR COMO FALLIDO si no se puede terminar
-                await self._marcar_cuenta_fallida(idcuenta, "No se pudo terminar la cuenta")
-
-                # ✅ EMITIR SIGNAL DE ERROR
-                if self.worker:
-                    self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
-                    self.worker.emit_tabla_refresh()
-
-                return resultado_fallo
-
-            # ✅ SUBPASO 4: Marcar como COMPLETADO solo si todo salió bien
-            self.db_manager.update_cuenta_estado(
-                idcuenta,
-                EstadoCuenta.COMPLETADO,
-                f"Procesada correctamente - {resultado_glosas['glosas_procesadas']} glosas"
-            )
-
-            # ✅ PREPARAR RESULTADO EXITOSO
-            resultado_exitoso = {
-                'exito': True,
-                'glosas_procesadas': resultado_glosas['glosas_procesadas'],
-                'glosas_fallidas': resultado_glosas['glosas_fallidas']
-            }
-
-            # ✅ EMITIR SIGNAL DE ÉXITO
-            if self.worker:
-                self.worker.emit_cuenta_processed(idcuenta, 'COMPLETADO')
-                self.worker.emit_tabla_refresh()
-
-            return resultado_exitoso
+            return {'exito': False, 'error': 'No hay glosas procesables'}
 
         except Exception as e:
-            error_msg = f"Error procesando cuenta completa {idcuenta}: {e}"
+            error_msg = f"Error procesando glosas de cuenta {idcuenta}: {e}"
             self._log(error_msg, "error")
-
-            # ✅ Marcar como fallida en BD con signal incluido
-            await self._marcar_cuenta_fallida(idcuenta, error_msg)
-
-            # ✅ REGRESAR A LA TABLA PRINCIPAL EN CASO DE EXCEPCIÓN
-            await self._regresar_tabla_principal()
-
-            # ✅ Los signals ya se emiten en _marcar_cuenta_fallida(), no duplicar aquí
-
             return {'exito': False, 'error': error_msg}
+    async def _guardar_glosas_sin_configuracion(self, idcuenta: str, glosas_sin_config: List[Dict]):
+        """
+        ➕ MÉTODO NUEVO - Agregar al final de la clase
+        Guarda en BD las glosas que no tienen configuración disponible.
+        """
+        try:
+            self._log(f"💾 Guardando {len(glosas_sin_config)} glosas sin configuración en BD")
 
+            with self.db_manager.get_connection() as conn:
+                for glosa in glosas_sin_config:
+                    # Insertar o actualizar glosa en detalle
+                    conn.execute("""
+                        INSERT OR REPLACE INTO glosa_items_detalle 
+                        (idglosa, idcuenta, codigo_glosa, descripcion_glosa, estado, motivo_fallo, fecha_procesamiento)
+                        VALUES (?, ?, ?, ?, 'SIN_CONFIGURACION', 'No se encontró configuración para esta glosa', CURRENT_TIMESTAMP)
+                    """, (
+                        glosa['idglosa'],
+                        idcuenta,
+                        glosa.get('codigo_glosa', ''),
+                        glosa.get('descripcion', ''),
+                    ))
+
+                conn.commit()
+                self._log(f"✅ {len(glosas_sin_config)} glosas marcadas como SIN_CONFIGURACION en BD")
+
+        except Exception as e:
+            self._log(f"❌ Error guardando glosas sin configuración: {e}", "error")
     
     async def _procesar_glosa_individual(self, idcuenta: str, glosa_info: Dict) -> Dict:
         """
@@ -761,18 +775,18 @@ class ProcesadorCompletoGlosasImplementado:
         try:
             # Preparar texto en mayúsculas
             texto_mayuscula = respuesta_texto.upper()
-            
+
             # Localizar y preparar el textarea
             textarea = self.page.locator(self.selectores['textarea_justificacion'])
             await textarea.scroll_into_view_if_needed()
             await textarea.click()
             await asyncio.sleep(0.5)
-            
+
             # Limpiar campo completamente
             await textarea.press('Control+a')
             await textarea.press('Delete')
             await asyncio.sleep(0.5)
-            
+
             # ✅ PEGAR TEXTO PRIMERO: Usar JavaScript para pegar directamente desde BD
             self._log("📋 Pegando texto de la base de datos...")
             await self.page.evaluate("""
@@ -786,18 +800,18 @@ class ProcesadorCompletoGlosasImplementado:
                     }
                 }
             """, texto_mayuscula)
-            
+
             await asyncio.sleep(0.3)
-            
+
             # ✅ SIMULACIÓN HUMANA: Agregar espacios al final
             self._log("📝 Agregando espacios finales...")
             await textarea.press_sequentially("   ", delay=120)  # 3 espacios al final con delay humano
             await asyncio.sleep(0.2)
-            
+
             # Simular Tab para salir del campo (dispara validación)
             await textarea.press('Tab')
             await asyncio.sleep(1)
-            
+
             # Verificar resultado
             clases = await textarea.get_attribute('class')
             if clases and 'is-valid' in clases:
@@ -815,26 +829,26 @@ class ProcesadorCompletoGlosasImplementado:
                         if (textarea) {
                             textarea.value = texto;
                             textarea.focus();
-                            
+
                             // Disparar eventos de validación
                             textarea.dispatchEvent(new Event('input', { bubbles: true }));
                             textarea.dispatchEvent(new Event('change', { bubbles: true }));
                             textarea.dispatchEvent(new Event('blur', { bubbles: true }));
-                            
+
                             // Actualizar clases
                             textarea.classList.remove('is-invalid');
                             textarea.classList.add('is-valid');
-                            
+
                             // Ocultar mensaje de error si existe
                             const errorMsg = document.getElementById('glosaRespObsHelp');
                             if (errorMsg) errorMsg.style.display = 'none';
                         }
                     }
                 """, texto_mayuscula)
-                
+
                 self._log("✅ Justificación llenada con JavaScript")
                 return True
-                
+
         except Exception as e:
             self._log(f"❌ Error llenando justificación: {e}", "error")
             return False
@@ -1084,26 +1098,27 @@ class ProcesadorCompletoGlosasImplementado:
     
     async def _marcar_cuenta_fallida(self, idcuenta: str, motivo: str):
         """
-        Marca una cuenta como fallida en la BD y emite signals.
-        MEJORADO: Incluye emisión de signals para actualización en tiempo real.
+        🔄 MEJORAR MÉTODO EXISTENTE (conservar signals y lógica actual)
         """
         try:
-            # Marcar en BD
+            self._log(f"❌ Marcando cuenta {idcuenta} como FALLIDA: {motivo}")
+            
+            # Usar tu método existente del db_manager
             self.db_manager.update_cuenta_estado(
                 idcuenta, 
-                EstadoCuenta.FALLIDO, 
-                motivo[:200]
+                EstadoCuenta.FALLIDO,  # o EstadoCuenta.FALLIDA según tu enum
+                motivo
             )
-
-            # ✅ NUEVO: Emitir signals para actualización en tiempo real
+            
+            # ✅ CONSERVAR tus signals existentes
             if self.worker:
                 self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
                 self.worker.emit_tabla_refresh()
-
-            self._log(f"❌ Cuenta {idcuenta} marcada como FALLIDA: {motivo[:100]}...")
-
+                
+            self._log(f"✅ Cuenta {idcuenta} marcada como FALLIDA en BD")
+            
         except Exception as e:
-            self._log(f"⚠️ Error marcando cuenta {idcuenta} como fallida: {e}", "warning")
+            self._log(f"❌ Error marcando cuenta como fallida: {e}", "error")
     
     async def _guardar_glosa_procesada(self, idcuenta: str, glosa_info: Dict, configuracion: Dict):
         """Guarda una glosa como procesada en ambas tablas."""
