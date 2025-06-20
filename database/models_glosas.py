@@ -11,6 +11,17 @@ class EstadoCuenta(Enum):
     FALLIDO = "FALLIDO"
     FALLA_TOTAL = "FALLA_TOTAL"  # ✅ NUEVO: Para 5+ intentos
 
+
+class TipoProcesabilidad(Enum):
+    """
+    Tipos de procesabilidad para módulo EN PAUSA.
+    ✅ NUEVO: Para categorizar cuentas según su elegibilidad de reprocesamiento.
+    """
+    PROCESABLE = "PROCESABLE"          # FALLIDO/EN_PROCESO con < 5 intentos
+    NO_PROCESABLE = "NO_PROCESABLE"    # FALLA_TOTAL o >= 5 intentos
+    COMPLETADO = "COMPLETADO"          # Ya procesado exitosamente
+    OTRO = "OTRO"  
+
 @dataclass
 class CuentaGlosasPrincipal:
     """
@@ -81,6 +92,71 @@ class CuentaGlosasPrincipal:
             motivo_fallo=data.get('motivo_fallo', ''),
             intentos=data.get('intentos', 0)
         )
+    
+    def es_procesable_en_pausa(self) -> bool:
+        """
+        Determina si esta cuenta es procesable en el módulo EN PAUSA.
+        
+        Returns:
+            bool: True si puede ser reprocesada
+        """
+        return (
+            self.estado in [EstadoCuenta.FALLIDO, EstadoCuenta.EN_PROCESO] and 
+            self.intentos < 5
+        )
+    
+    def get_procesabilidad(self) -> TipoProcesabilidad:
+        """
+        Obtiene el tipo de procesabilidad para módulo EN PAUSA.
+        
+        Returns:
+            TipoProcesabilidad: Tipo de procesabilidad
+        """
+        if self.estado == EstadoCuenta.COMPLETADO:
+            return TipoProcesabilidad.COMPLETADO
+        elif self.estado == EstadoCuenta.FALLA_TOTAL or self.intentos >= 5:
+            return TipoProcesabilidad.NO_PROCESABLE
+        elif self.estado in [EstadoCuenta.FALLIDO, EstadoCuenta.EN_PROCESO]:
+            return TipoProcesabilidad.PROCESABLE
+        else:
+            return TipoProcesabilidad.OTRO
+    
+    def incrementar_intentos(self) -> None:
+        """
+        Incrementa el número de intentos y actualiza estado si es necesario.
+        """
+        self.intentos += 1
+        
+        if self.intentos >= 5:
+            self.estado = EstadoCuenta.FALLA_TOTAL
+            self.motivo_fallo = f"Superó 5 intentos de procesamiento (intento {self.intentos})"
+        else:
+            self.estado = EstadoCuenta.EN_PROCESO
+    
+    def marcar_como_recuperada(self, glosas_procesadas: int = 0) -> None:
+        """
+        Marca la cuenta como recuperada exitosamente.
+        
+        Args:
+            glosas_procesadas (int): Número de glosas procesadas
+        """
+        self.estado = EstadoCuenta.COMPLETADO
+        self.fecha_fin = datetime.now()
+        self.glosas_procesadas = glosas_procesadas
+        self.motivo_fallo = f"Recuperada en intento {self.intentos} - {glosas_procesadas} glosas procesadas"
+    
+    def get_info_resumen(self) -> str:
+        """
+        Obtiene información resumida de la cuenta para logs.
+        
+        Returns:
+            str: Resumen de la cuenta
+        """
+        procesabilidad = self.get_procesabilidad()
+        return (
+            f"Cuenta {self.idcuenta}: {self.estado.value} "
+            f"(intentos: {self.intentos}, procesabilidad: {procesabilidad.value})"
+        )
 
 @dataclass
 class GlosaItemDetalle:
@@ -150,4 +226,62 @@ class GlosaItemDetalle:
             respuesta_enviada=data.get('respuesta_enviada', ''),
             archivo_subido=data.get('archivo_subido', ''),
             error_procesamiento=data.get('error_procesamiento', '')
+        )
+@dataclass
+class EstadisticasEnPausa:
+    """
+    Modelo para estadísticas específicas del módulo EN PAUSA.
+    """
+    total_fallidas: int = 0
+    total_en_proceso: int = 0
+    total_falla_total: int = 0
+    total_procesables: int = 0
+    total_no_procesables: int = 0
+    total_recuperadas_hoy: int = 0
+    
+    def get_tasa_recuperacion(self) -> float:
+        """Calcula la tasa de recuperación."""
+        total_intentadas = self.total_fallidas + self.total_en_proceso
+        if total_intentadas == 0:
+            return 0.0
+        return (self.total_recuperadas_hoy / total_intentadas) * 100
+    
+    def get_resumen(self) -> str:
+        """Obtiene resumen de estadísticas."""
+        return (
+            f"EN PAUSA: {self.total_procesables} procesables, "
+            f"{self.total_falla_total} falla total, "
+            f"tasa recuperación: {self.get_tasa_recuperacion():.1f}%"
+        )
+
+@dataclass 
+class ResultadoReprocesamiento:
+    """
+    Modelo para resultados de reprocesamiento EN PAUSA.
+    """
+    cuentas_procesadas: int = 0
+    cuentas_recuperadas: int = 0
+    cuentas_falla_total: int = 0
+    tiempo_total: float = 0.0
+    errores: List[str] = None
+    
+    def __post_init__(self):
+        if self.errores is None:
+            self.errores = []
+    
+    def get_tasa_exito(self) -> float:
+        """Calcula la tasa de éxito del reprocesamiento."""
+        if self.cuentas_procesadas == 0:
+            return 0.0
+        return (self.cuentas_recuperadas / self.cuentas_procesadas) * 100
+    
+    def agregar_error(self, error: str) -> None:
+        """Agrega un error al resultado."""
+        self.errores.append(error)
+    
+    def get_resumen_final(self) -> str:
+        """Obtiene resumen final del reprocesamiento."""
+        return (
+            f"Reprocesamiento: {self.cuentas_recuperadas}/{self.cuentas_procesadas} "
+            f"({self.get_tasa_exito():.1f}% éxito) en {self.tiempo_total:.1f}s"
         )

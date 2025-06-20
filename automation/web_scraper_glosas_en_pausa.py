@@ -1,7 +1,7 @@
 # automation/web_scraper_glosas_en_pausa.py
 import asyncio
 import logging
-from typing import Optional, Tuple, List, Dict  # ✅ CORREGIDO PARA PYTHON 3.8
+from typing import Optional, Tuple, List, Dict
 from playwright.async_api import Page
 from automation.login_handler import LoginHandler
 from automation.navigation_handler import NavigationHandler, AutomationState, NavigationState
@@ -13,8 +13,8 @@ from config.settings import Settings
 class WebScraperGlosasEnPausa:
     """
     Automatizador específico para gestión de glosas EN PAUSA.
-    DIFERENCIA CLAVE: Navega a "En Pausa" en lugar de "Bolsa Respuesta"
-    y procesa solo cuentas FALLIDAS y EN_PROCESO.
+    ✅ DISEÑO: Reutiliza 100% la lógica existente sin modificar código que funciona.
+    ✅ DIFERENCIA: Solo agrega control de intentos y filtrado específico.
     """
     
     def __init__(self, worker_thread=None):
@@ -27,7 +27,6 @@ class WebScraperGlosasEnPausa:
         self.logger = logging.getLogger(__name__)
         self.login_handler = LoginHandler()
         self.navigation_handler: Optional[NavigationHandler] = None
-        self.procesador_completo: Optional[ProcesadorCompletoGlosasImplementado] = None
         self.page: Optional[Page] = None
         
         # Worker para emitir signals en tiempo real
@@ -43,6 +42,9 @@ class WebScraperGlosasEnPausa:
             current_method="__init__"
         )
         
+        # ✅ COMPOSICIÓN: Usar el procesador existente SIN modificarlo
+        self.procesador_original = None
+        
         # Estadísticas globales
         self.estadisticas_globales = {
             'inicio_proceso': 0,
@@ -52,7 +54,7 @@ class WebScraperGlosasEnPausa:
             'tiempo_total': 0
         }
         
-        self._log_state("WebScraperGlosasEnPausa inicializado para reprocesamiento EN PAUSA")
+        self._log_state("WebScraperGlosasEnPausa inicializado con COMPOSICIÓN")
         
     def _log_state(self, message: str, level: str = "info"):
         """Log con información de estado actual."""
@@ -69,6 +71,7 @@ class WebScraperGlosasEnPausa:
     async def start_glosas_en_pausa_automation(self, username: str, password: str) -> bool:
         """
         MÉTODO PRINCIPAL: Inicia la automatización de glosas EN PAUSA.
+        ✅ ESTRATEGIA: Usar procesador existente + wrapper de intentos.
         
         Args:
             username (str): Usuario para login
@@ -80,26 +83,25 @@ class WebScraperGlosasEnPausa:
         try:
             self.automation_state.update(
                 method_name="start_glosas_en_pausa_automation",
-                action="Iniciando automatización EN PAUSA"
+                action="Iniciando automatización EN PAUSA con COMPOSICIÓN"
             )
             
             self.estadisticas_globales['inicio_proceso'] = asyncio.get_event_loop().time()
             
-            self._log_state("🔄 === INICIANDO AUTOMATIZACIÓN DE GLOSAS EN PAUSA ===")
-            self._log_state("🎯 OBJETIVO: Reprocesar cuentas FALLIDAS y EN_PROCESO")
-            self._log_state("🎯 NAVEGACIÓN: Respuesta Glosas → En Pausa")
+            self._log_state("🔄 === INICIANDO AUTOMATIZACIÓN EN PAUSA (COMPOSICIÓN) ===")
+            self._log_state("✅ REUTILIZA: 100% lógica existente + wrapper de intentos")
             self._log_state("="*100)
             
-            # ETAPA 1: LOGIN
+            # ETAPA 1: LOGIN (igual que el original)
             if not await self._etapa1_login(username, password):
                 return False
             
-            # ETAPA 2: NAVEGACIÓN A EN PAUSA
+            # ETAPA 2: NAVEGACIÓN A EN PAUSA (modificado)
             if not await self._etapa2_navegacion_en_pausa():
                 return False
             
-            # ETAPA 3: PROCESAMIENTO DE CUENTAS EN PAUSA
-            if not await self._etapa3_procesamiento_en_pausa():
+            # ETAPA 3: PROCESAMIENTO CON WRAPPER DE INTENTOS
+            if not await self._etapa3_procesamiento_con_wrapper():
                 return False
             
             self.estadisticas_globales['fin_proceso'] = asyncio.get_event_loop().time()
@@ -127,12 +129,12 @@ class WebScraperGlosasEnPausa:
             await self._mantener_abierto_para_inspeccion()
     
     async def _etapa1_login(self, username: str, password: str) -> bool:
-        """ETAPA 1: Realiza el proceso de login."""
+        """ETAPA 1: Login (idéntico al original)."""
         try:
             self.automation_state.update(
                 method_name="_etapa1_login",
                 state=NavigationState.LOGIN_PAGE,
-                action="ETAPA 1: Realizando login para EN PAUSA"
+                action="ETAPA 1: Login para EN PAUSA"
             )
             
             self._log_state("🔐 ETAPA 1: PROCESO DE LOGIN PARA EN PAUSA")
@@ -161,7 +163,7 @@ class WebScraperGlosasEnPausa:
             return False
     
     async def _etapa2_navegacion_en_pausa(self) -> bool:
-        """ETAPA 2: Navega hasta EN PAUSA en lugar de Bolsa Respuesta."""
+        """ETAPA 2: Navegar a EN PAUSA (igual que Bolsa Respuesta pero diferente selector)."""
         try:
             self.automation_state.update(
                 method_name="_etapa2_navegacion_en_pausa",
@@ -172,7 +174,7 @@ class WebScraperGlosasEnPausa:
             self._log_state("-"*50)
             
             # Inicializar manejador de navegación
-            self.navigation_handler = NavigationHandlerEnPausa(self.page, self.automation_state)
+            self.navigation_handler = NavigationHandler(self.page, self.automation_state)
             
             # Navegar a Respuesta Glosas
             self._log_state("📍 Navegando a Respuesta Glosas...")
@@ -180,9 +182,9 @@ class WebScraperGlosasEnPausa:
                 self._log_state("❌ Error navegando a Respuesta Glosas", "error")
                 return False
             
-            # ✅ DIFERENCIA CLAVE: Navegar a EN PAUSA en lugar de Bolsa Respuesta
+            # ✅ NAVEGACIÓN ESPECÍFICA A EN PAUSA
             self._log_state("📍 Navegando a EN PAUSA...")
-            if not await self.navigation_handler.navigate_to_en_pausa():
+            if not await self._navegar_a_en_pausa_especifico():
                 self._log_state("❌ Error navegando a EN PAUSA", "error")
                 return False
             
@@ -194,60 +196,296 @@ class WebScraperGlosasEnPausa:
             self._log_state(f"❌ Error en ETAPA 2 (navegación EN PAUSA): {e}", "error")
             return False
     
-    async def _etapa3_procesamiento_en_pausa(self) -> bool:
+    async def _navegar_a_en_pausa_especifico(self) -> bool:
+        """Navegación específica a EN PAUSA (sin modificar NavigationHandler)."""
+        try:
+            # Selector específico para EN PAUSA
+            selector_en_pausa = "//span[@class='sidebar-nav-name'][contains(.,'En Pausa')]"
+            
+            element = self.page.locator(f"xpath={selector_en_pausa}")
+            
+            if await element.count() == 0:
+                self._log_state("❌ No se encontró el submenú 'En Pausa'", "error")
+                return False
+            
+            await element.scroll_into_view_if_needed()
+            await asyncio.sleep(0.5)
+            await element.click()
+            
+            # Esperar carga
+            await self.page.wait_for_load_state('networkidle', timeout=15000)
+            await asyncio.sleep(2)
+            
+            # Verificar que se cargó
+            if "pausa" in self.page.url.lower() or await self.page.locator("text=En Pausa").count() > 0:
+                self._log_state("✅ Navegación a EN PAUSA verificada")
+                return True
+            else:
+                self._log_state("❌ No se pudo verificar navegación a EN PAUSA", "error")
+                return False
+                
+        except Exception as e:
+            self._log_state(f"❌ Error navegando específicamente a EN PAUSA: {e}", "error")
+            return False
+    
+    async def _etapa3_procesamiento_con_wrapper(self) -> bool:
         """
-        ETAPA 3: Procesamiento específico para cuentas EN PAUSA.
-        
-        Returns:
-            bool: True si se procesó correctamente
+        ETAPA 3: Procesamiento usando el procesador ORIGINAL con wrapper de intentos.
+        ✅ NO MODIFICA CÓDIGO EXISTENTE - USA COMPOSICIÓN.
         """
         try:
             self.automation_state.update(
-                method_name="_etapa3_procesamiento_en_pausa",
-                action="ETAPA 3: Procesamiento EN PAUSA"
+                method_name="_etapa3_procesamiento_con_wrapper",
+                action="ETAPA 3: Procesamiento con wrapper de intentos"
             )
             
-            self._log_state("⚙️ ETAPA 3: PROCESAMIENTO EN PAUSA")
+            self._log_state("⚙️ ETAPA 3: PROCESAMIENTO CON WRAPPER (SIN MODIFICAR ORIGINAL)")
             self._log_state("-"*50)
-            self._log_state("🎯 FUNCIONALIDADES ESPECÍFICAS EN PAUSA:")
-            self._log_state("   • Buscar solo cuentas FALLIDAS y EN_PROCESO")
-            self._log_state("   • Incrementar contador de intentos")
-            self._log_state("   • Procesamiento con lógica de reintentos")
-            self._log_state("   • ✅ ACTUALIZACIÓN EN TIEMPO REAL")
+            self._log_state("✅ ESTRATEGIA: Procesador original + wrapper de intentos")
+            self._log_state("✅ NO MODIFICA: Métodos existentes que funcionan")
             self._log_state("-"*50)
             
-            # Inicializar procesador CON worker para signals y modo EN PAUSA
-            self.procesador_completo = ProcesadorCompletoEnPausa(
+            # ✅ PASO 1: Crear procesador original (sin modificar)
+            self.procesador_original = ProcesadorCompletoGlosasImplementado(
                 self.page, 
                 self.automation_state,
                 worker_thread=self.worker
             )
             
-            self._log_state("🚀 Iniciando procesamiento EN PAUSA con signals en tiempo real...")
+            # ✅ PASO 2: Obtener cuentas EN PAUSA con filtro específico
+            cuentas_en_pausa = await self._obtener_cuentas_en_pausa_independiente()
             
-            # Procesar cuentas EN PAUSA con funcionalidad específica
-            procesadas, fallidas = await self.procesador_completo.procesar_filas_tabla_en_pausa()
-            
-            # Actualizar estadísticas globales
-            self.estadisticas_globales['total_cuentas_procesadas'] = procesadas
-            self.estadisticas_globales['total_cuentas_fallidas'] = fallidas
-            
-            self._log_state("-"*50)
-            self._log_state("📊 RESULTADOS DE PROCESAMIENTO EN PAUSA:")
-            self._log_state(f"   • Cuentas reprocesadas exitosamente: {procesadas}")
-            self._log_state(f"   • Cuentas que siguen fallando: {fallidas}")
-            
-            if procesadas == 0 and fallidas == 0:
-                self._log_state("⚠️ ETAPA 3: No se procesaron cuentas EN PAUSA", "warning")
+            if not cuentas_en_pausa:
+                self._log_state("⚠️ No hay cuentas EN PAUSA para reprocesar", "warning")
                 return False
             
-            self._log_state("✅ ETAPA 3 COMPLETADA: Procesamiento EN PAUSA terminado")
+            # ✅ PASO 3: Procesar cada cuenta con wrapper de intentos
+            cuentas_procesadas = 0
+            cuentas_fallidas = 0
+            
+            for i, cuenta_data in enumerate(cuentas_en_pausa):
+                idcuenta = cuenta_data['idcuenta']
+                intentos_actuales = cuenta_data.get('intentos', 0)
+                
+                self._log_state(f"🔄 REPROCESANDO {i + 1}/{len(cuentas_en_pausa)}: {idcuenta} (intentos: {intentos_actuales})")
+                
+                try:
+                    # ✅ WRAPPER: Control de intentos ANTES de procesar
+                    if not await self._pre_proceso_control_intentos(idcuenta, intentos_actuales):
+                        cuentas_fallidas += 1
+                        continue
+                    
+                    # ✅ USAR PROCESADOR ORIGINAL SIN MODIFICAR
+                    resultado = await self._procesar_con_original(idcuenta)
+                    
+                    # ✅ WRAPPER: Manejo de resultado CON intentos
+                    if resultado['exito']:
+                        cuentas_procesadas += 1
+                        self.estadisticas_globales['total_cuentas_procesadas'] += 1
+                        await self._post_proceso_exitoso(idcuenta)
+                        self._log_state(f"✅ CUENTA {idcuenta} RECUPERADA")
+                    else:
+                        cuentas_fallidas += 1
+                        self.estadisticas_globales['total_cuentas_fallidas'] += 1
+                        await self._post_proceso_fallido(idcuenta, intentos_actuales + 1, resultado.get('error', ''))
+                        self._log_state(f"❌ CUENTA {idcuenta} FALLÓ (intento {intentos_actuales + 1})")
+                
+                except Exception as e:
+                    cuentas_fallidas += 1
+                    await self._post_proceso_fallido(idcuenta, intentos_actuales + 1, f"Error general: {e}")
+                    self._log_state(f"❌ Error procesando {idcuenta}: {e}", "error")
+                
+                await asyncio.sleep(3)
+            
             self._log_state("-"*50)
+            self._log_state("📊 ETAPA 3 COMPLETADA:")
+            self._log_state(f"   • Reprocesadas exitosamente: {cuentas_procesadas}")
+            self._log_state(f"   • Que siguen fallando: {cuentas_fallidas}")
+            self._log_state("-"*50)
+            
             return True
             
         except Exception as e:
-            self._log_state(f"❌ Error en ETAPA 3 (procesamiento EN PAUSA): {e}", "error")
+            self._log_state(f"❌ Error en ETAPA 3 (procesamiento wrapper): {e}", "error")
             return False
+    
+    async def _obtener_cuentas_en_pausa_independiente(self) -> List[Dict]:
+        """
+        Obtiene cuentas EN PAUSA usando métodos del procesador original.
+        ✅ INDEPENDIENTE: No modifica código existente.
+        """
+        try:
+            self._log_state("📋 Obteniendo cuentas EN PAUSA (método independiente)")
+            
+            # ✅ USAR MÉTODO EXISTENTE del procesador original
+            await self.procesador_original._preparar_sistema()
+            todas_las_cuentas = await self.procesador_original.extraer_datos_filas_tabla()
+            
+            if not todas_las_cuentas:
+                return []
+            
+            # ✅ FILTRO ESPECÍFICO PARA EN PAUSA
+            cuentas_para_reprocesar = []
+            
+            for cuenta_web in todas_las_cuentas:
+                idcuenta = cuenta_web['idcuenta']
+                
+                # Consultar estado e intentos desde BD
+                estado_bd, intentos_bd = self._consultar_estado_intentos_independiente(idcuenta)
+                
+                # ✅ FILTRO: Solo FALLIDAS/EN_PROCESO con menos de 5 intentos
+                if estado_bd in ['FALLIDO', 'EN_PROCESO'] and intentos_bd < 5:
+                    cuenta_web['estado_bd'] = estado_bd
+                    cuenta_web['intentos'] = intentos_bd
+                    cuentas_para_reprocesar.append(cuenta_web)
+                    
+                    self._log_state(f"✅ {idcuenta} elegible: {estado_bd} (intentos: {intentos_bd})")
+                else:
+                    if intentos_bd >= 5:
+                        self._log_state(f"⏭️ {idcuenta} saltada: +5 intentos")
+                    else:
+                        self._log_state(f"⏭️ {idcuenta} saltada: estado {estado_bd}")
+            
+            self._log_state(f"✅ {len(cuentas_para_reprocesar)} cuentas EN PAUSA encontradas")
+            
+            # Emitir signal
+            if self.worker and cuentas_para_reprocesar:
+                self.worker.emit_data_imported(len(cuentas_para_reprocesar))
+                await asyncio.sleep(1)
+            
+            return cuentas_para_reprocesar
+            
+        except Exception as e:
+            self._log_state(f"❌ Error obteniendo cuentas EN PAUSA: {e}", "error")
+            return []
+    
+    def _consultar_estado_intentos_independiente(self, idcuenta: str) -> Tuple[str, int]:
+        """Consulta estado e intentos (método independiente)."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT estado, COALESCE(intentos, 0) as intentos 
+                    FROM cuenta_glosas_principal 
+                    WHERE idcuenta = ?
+                """, (idcuenta,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return row['estado'], row['intentos']
+                else:
+                    return 'PENDIENTE', 0
+                    
+        except Exception as e:
+            self._log_state(f"❌ Error consultando BD {idcuenta}: {e}", "error")
+            return 'DESCONOCIDO', 0
+    
+    async def _pre_proceso_control_intentos(self, idcuenta: str, intentos_actuales: int) -> bool:
+        """Pre-procesamiento: Control de intentos ANTES de usar procesador original."""
+        try:
+            # Verificar límite de intentos
+            if intentos_actuales >= 5:
+                await self._marcar_como_falla_total_independiente(idcuenta)
+                self._log_state(f"🚫 {idcuenta} FALLA TOTAL (5+ intentos)")
+                return False
+            
+            # Incrementar intentos y marcar como EN_PROCESO
+            await self._incrementar_intentos_independiente(idcuenta)
+            return True
+            
+        except Exception as e:
+            self._log_state(f"❌ Error en pre-proceso {idcuenta}: {e}", "error")
+            return False
+    
+    async def _procesar_con_original(self, idcuenta: str) -> Dict:
+        """
+        Procesa cuenta usando el procesador ORIGINAL sin modificaciones.
+        ✅ COMPOSICIÓN PURA: Usa método existente tal como está.
+        """
+        try:
+            # ✅ USAR MÉTODO ORIGINAL SIN MODIFICAR
+            resultado = await self.procesador_original._procesar_cuenta_completa(idcuenta)
+            return resultado
+            
+        except Exception as e:
+            return {'exito': False, 'error': f"Error en procesador original: {e}"}
+    
+    async def _post_proceso_exitoso(self, idcuenta: str):
+        """Post-procesamiento: Manejo de cuenta exitosa."""
+        try:
+            # El procesador original ya marca como COMPLETADO
+            # Solo emitir signal adicional
+            if self.worker:
+                self.worker.emit_cuenta_processed(idcuenta, 'COMPLETADO')
+                
+        except Exception as e:
+            self._log_state(f"❌ Error en post-proceso exitoso {idcuenta}: {e}", "error")
+    
+    async def _post_proceso_fallido(self, idcuenta: str, intentos_nuevos: int, error: str):
+        """Post-procesamiento: Manejo de cuenta fallida con intentos."""
+        try:
+            if intentos_nuevos >= 5:
+                await self._marcar_como_falla_total_independiente(idcuenta)
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'FALLA_TOTAL')
+            else:
+                await self._marcar_como_fallido_con_intentos(idcuenta, intentos_nuevos, error)
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
+                    
+        except Exception as e:
+            self._log_state(f"❌ Error en post-proceso fallido {idcuenta}: {e}", "error")
+    
+    async def _incrementar_intentos_independiente(self, idcuenta: str):
+        """Incrementa intentos (método independiente)."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                conn.execute("""
+                    UPDATE cuenta_glosas_principal 
+                    SET intentos = COALESCE(intentos, 0) + 1, 
+                        estado = 'EN_PROCESO',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE idcuenta = ?
+                """, (idcuenta,))
+                conn.commit()
+                
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'EN_PROCESO')
+                
+        except Exception as e:
+            self._log_state(f"❌ Error incrementando intentos {idcuenta}: {e}", "error")
+    
+    async def _marcar_como_falla_total_independiente(self, idcuenta: str):
+        """Marca como falla total (método independiente)."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                conn.execute("""
+                    UPDATE cuenta_glosas_principal 
+                    SET estado = 'FALLA_TOTAL',
+                        motivo_fallo = 'Superó 5 intentos de procesamiento',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE idcuenta = ?
+                """, (idcuenta,))
+                conn.commit()
+                
+        except Exception as e:
+            self._log_state(f"❌ Error marcando falla total {idcuenta}: {e}", "error")
+    
+    async def _marcar_como_fallido_con_intentos(self, idcuenta: str, intentos: int, error: str):
+        """Marca como fallido con número de intentos (método independiente)."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                conn.execute("""
+                    UPDATE cuenta_glosas_principal 
+                    SET estado = 'FALLIDO',
+                        motivo_fallo = ?,
+                        intentos = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE idcuenta = ?
+                """, (f"Intento {intentos}/5: {error[:200]}", intentos, idcuenta))
+                conn.commit()
+                
+        except Exception as e:
+            self._log_state(f"❌ Error marcando fallido con intentos {idcuenta}: {e}", "error")
     
     async def _mostrar_resumen_final(self):
         """Muestra resumen final del reprocesamiento EN PAUSA."""
@@ -268,32 +506,14 @@ class WebScraperGlosasEnPausa:
             if total > 0:
                 tasa_recuperacion = (procesadas / total) * 100
                 self._log_state(f"📈 TASA DE RECUPERACIÓN: {tasa_recuperacion:.1f}%")
-                
-                if procesadas > 0:
-                    tiempo_promedio = tiempo_total / procesadas
-                    self._log_state(f"⚡ TIEMPO PROMEDIO POR CUENTA: {tiempo_promedio:.2f} segundos")
             
             self._log_state("")
-            self._log_state("🎯 FUNCIONALIDADES IMPLEMENTADAS EN PAUSA:")
-            self._log_state("   ✅ Login automático")
-            self._log_state("   ✅ Navegación a EN PAUSA")
-            self._log_state("   ✅ Filtrado de cuentas FALLIDAS/EN_PROCESO")
-            self._log_state("   ✅ Control de reintentos")
-            self._log_state("   ✅ Procesamiento con modales")
-            self._log_state("   ✅ ACTUALIZACIÓN EN TIEMPO REAL")
-            
+            self._log_state("✅ VENTAJAS DEL ENFOQUE COMPOSICIÓN:")
+            self._log_state("   • 100% reutilización de código existente")
+            self._log_state("   • Sin modificar métodos que funcionan")
+            self._log_state("   • Mantenimiento independiente")
+            self._log_state("   • Control de intentos específico")
             self._log_state("="*100)
-            
-            # Determinar resultado final
-            if procesadas > 0:
-                if tasa_recuperacion >= 70:
-                    self._log_state("🎉 RESULTADO: REPROCESAMIENTO EXITOSO")
-                elif tasa_recuperacion >= 40:
-                    self._log_state("⚠️ RESULTADO: REPROCESAMIENTO PARCIALMENTE EXITOSO")
-                else:
-                    self._log_state("❌ RESULTADO: REPROCESAMIENTO CON PROBLEMAS")
-            else:
-                self._log_state("❌ RESULTADO: REPROCESAMIENTO FALLIDO")
             
         except Exception as e:
             self._log_state(f"❌ Error mostrando resumen final EN PAUSA: {e}", "error")
@@ -310,11 +530,6 @@ class WebScraperGlosasEnPausa:
             self._log_state("-"*50)
             self._log_state("🌐 Navegador abierto para inspección - Se cerrará en 60 segundos")
             
-            # Obtener estado final
-            if self.navigation_handler:
-                final_info = await self.navigation_handler.get_current_page_info()
-                self._log_state(f"📋 Estado final: {final_info}")
-            
             self._log_state("⏳ Manteniendo navegador abierto por 60 segundos...")
             await asyncio.sleep(60)
             
@@ -323,324 +538,3 @@ class WebScraperGlosasEnPausa:
             
         except Exception as e:
             self._log_state(f"❌ Error manteniendo navegador abierto: {e}", "error")
-
-
-class NavigationHandlerEnPausa(NavigationHandler):
-    """
-    Extensión del NavigationHandler para navegar a EN PAUSA.
-    """
-    
-    async def navigate_to_en_pausa(self) -> bool:
-        """
-        Navega al submenú 'En Pausa' (debe estar en Respuesta Glosas primero).
-        
-        Returns:
-            bool: True si la navegación fue exitosa
-        """
-        try:
-            self.state.update(
-                method_name="navigate_to_en_pausa",
-                action="Navegando a En Pausa"
-            )
-            
-            self._log_state("Iniciando navegación a En Pausa")
-            
-            # Verificar que estamos en el estado correcto
-            if self.state.current_state != NavigationState.RESPUESTA_GLOSAS_MENU:
-                self._log_state("No estamos en Respuesta Glosas, navegando primero...", "warning")
-                if not await self.navigate_to_respuesta_glosas():
-                    return False
-            
-            # Actualizar información de página actual
-            await self._update_page_info()
-            
-            # ✅ SELECTOR ESPECÍFICO PARA EN PAUSA
-            selector = "//span[@class='sidebar-nav-name'][contains(.,'En Pausa')]"
-            
-            # Buscar el elemento
-            element = self.page.locator(f"xpath={selector}")
-            
-            # Verificar que existe
-            if await element.count() == 0:
-                self._log_state("No se encontró el submenú 'En Pausa'", "error")
-                await self.page.screenshot(path="error_no_en_pausa_menu.png")
-                self.state.update(state=NavigationState.ERROR)
-                return False
-            
-            self._log_state("Elemento 'En Pausa' encontrado")
-            
-            # Hacer scroll al elemento si es necesario
-            await element.scroll_into_view_if_needed()
-            await asyncio.sleep(0.5)
-            
-            # Hacer clic en "En Pausa"
-            await element.click()
-            self._log_state("Clic realizado en 'En Pausa'")
-            
-            # Esperar a que cargue
-            await self.page.wait_for_load_state('networkidle', timeout=15000)
-            await asyncio.sleep(2)
-            
-            # Verificar que la navegación fue exitosa
-            success = await self._verify_en_pausa_loaded()
-            
-            if success:
-                self.state.update(
-                    state=NavigationState.BOLSA_RESPUESTA,  # Usar mismo estado
-                    action="Navegación a En Pausa exitosa"
-                )
-                self._log_state("Navegación a En Pausa completada exitosamente")
-                return True
-            else:
-                self.state.update(state=NavigationState.ERROR)
-                self._log_state("Falló la verificación de navegación a En Pausa", "error")
-                return False
-                
-        except Exception as e:
-            self.state.update(state=NavigationState.ERROR)
-            self._log_state(f"Error navegando a En Pausa: {e}", "error")
-            await self.page.screenshot(path="error_navigate_en_pausa.png")
-            return False
-    
-    async def _verify_en_pausa_loaded(self) -> bool:
-        """
-        Verifica que la sección En Pausa se haya cargado correctamente.
-        
-        Returns:
-            bool: True si se cargó correctamente
-        """
-        try:
-            self.state.update(method_name="_verify_en_pausa_loaded")
-            
-            # Actualizar información de página
-            await self._update_page_info()
-            
-            # Verificar por texto "En Pausa"
-            selector = "text=En Pausa"
-            element = self.page.locator(selector)
-            
-            if await element.count() > 0:
-                self._log_state("✅ En Pausa verificado con text selector")
-                return True
-            
-            # Si el selector principal falla, verificar URL como respaldo
-            current_url = self.page.url
-            if 'pausa' in current_url.lower() or 'respuesta' in current_url.lower():
-                self._log_state(f"✅ En Pausa verificado por URL: {current_url}")
-                return True
-            
-            self._log_state("❌ No se pudo verificar que En Pausa esté cargado", "warning")
-            return False
-            
-        except Exception as e:
-            self._log_state(f"Error verificando En Pausa: {e}", "error")
-            return False
-
-
-class ProcesadorCompletoEnPausa(ProcesadorCompletoGlosasImplementado):
-    """
-    ✅ CORREGIDO: Procesador EN PAUSA que REUTILIZA todos los métodos existentes.
-    """
-    
-    async def procesar_filas_tabla_en_pausa(self) -> Tuple[int, int]:
-        """
-        ✅ CORREGIDO: Usa métodos existentes de la clase padre.
-        """
-        try:
-            self.state.update(
-                method_name="procesar_filas_tabla_en_pausa",
-                action="Procesando EN PAUSA con métodos existentes"
-            )
-            
-            self.estadisticas['tiempo_inicio'] = asyncio.get_event_loop().time()
-            
-            self._log("🔄 === PROCESAMIENTO EN PAUSA CORREGIDO ===")
-            self._log("✅ REUTILIZA: Métodos de ProcesadorCompletoGlosasImplementado")
-            self._log("=" * 100)
-            
-            # ✅ PASO 1: Preparar sistema (método existente)
-            if not await self._preparar_sistema():
-                return 0, 0
-            
-            # ✅ PASO 2: USAR MÉTODO EXISTENTE para extraer tabla
-            cuentas_en_pausa = await self._obtener_cuentas_en_pausa_corregido()
-            
-            if not cuentas_en_pausa:
-                self._log("⚠️ No hay cuentas EN PAUSA para reprocesar", "warning")
-                return 0, 0
-            
-            # ✅ PASO 3: Procesar usando método COMPLETO existente
-            cuentas_procesadas = 0
-            cuentas_fallidas = 0
-            
-            for i, cuenta_data in enumerate(cuentas_en_pausa):
-                idcuenta = cuenta_data['idcuenta']
-                intentos_actuales = cuenta_data.get('intentos_bd', 0)
-                
-                self._log(f"🔄 REPROCESANDO {i + 1}/{len(cuentas_en_pausa)}: {idcuenta} (intentos: {intentos_actuales})")
-                
-                try:
-                    # ✅ VERIFICAR LÍMITE ANTES DE PROCESAR
-                    if intentos_actuales >= 5:
-                        await self._marcar_como_falla_total(idcuenta)
-                        cuentas_fallidas += 1
-                        continue
-                    
-                    # ✅ INCREMENTAR INTENTOS
-                    await self._incrementar_intentos_corregido(idcuenta)
-                    
-                    # ✅ USAR MÉTODO COMPLETO EXISTENTE (sin modificar)
-                    resultado = await self._procesar_cuenta_completa(idcuenta)
-                    
-                    if resultado['exito']:
-                        cuentas_procesadas += 1
-                        self.estadisticas['cuentas_procesadas'] += 1
-                        self._log(f"✅ CUENTA {idcuenta} RECUPERADA")
-                    else:
-                        # Control de intentos después de fallar
-                        await self._manejar_fallo_con_intentos(idcuenta, intentos_actuales + 1)
-                        cuentas_fallidas += 1
-                        self.estadisticas['cuentas_fallidas'] += 1
-                
-                except Exception as e:
-                    await self._manejar_fallo_con_intentos(idcuenta, intentos_actuales + 1)
-                    await self._regresar_tabla_principal()
-                    cuentas_fallidas += 1
-                
-                await asyncio.sleep(3)
-            
-            self.estadisticas['tiempo_fin'] = asyncio.get_event_loop().time()
-            await self._mostrar_estadisticas_finales()
-            
-            return cuentas_procesadas, cuentas_fallidas
-            
-        except Exception as e:
-            self._log(f"❌ Error crítico EN PAUSA: {e}", "error")
-            return 0, 0
-    
-    async def _obtener_cuentas_en_pausa_corregido(self) -> List[Dict]:
-        """
-        ✅ CORREGIDO: Reutiliza método existente + filtra por intentos.
-        """
-        try:
-            self._log("📋 Extrayendo cuentas de tabla EN PAUSA (método corregido)")
-            
-            # ✅ REUTILIZAR método existente que SÍ funciona
-            todas_las_cuentas = await self.extraer_datos_filas_tabla()
-            
-            if not todas_las_cuentas:
-                self._log("❌ No se extrajeron cuentas de tabla", "error")
-                return []
-            
-            # ✅ FILTRAR por BD e intentos
-            cuentas_para_reprocesar = []
-            
-            for cuenta_web in todas_las_cuentas:
-                idcuenta = cuenta_web['idcuenta']
-                
-                try:
-                    # Consultar BD
-                    estado_bd, intentos_bd = self._consultar_estado_intentos_bd(idcuenta)
-                    
-                    # ✅ FILTRO ESPECÍFICO EN PAUSA
-                    if estado_bd in ['FALLIDO', 'EN_PROCESO'] and intentos_bd < 5:
-                        cuenta_web['estado_bd'] = estado_bd
-                        cuenta_web['intentos_bd'] = intentos_bd
-                        cuentas_para_reprocesar.append(cuenta_web)
-                        
-                        self._log(f"✅ {idcuenta} elegible: {estado_bd} (intentos: {intentos_bd})")
-                    else:
-                        if intentos_bd >= 5:
-                            self._log(f"⏭️ {idcuenta} saltada: +5 intentos")
-                        else:
-                            self._log(f"⏭️ {idcuenta} saltada: estado {estado_bd}")
-                
-                except Exception as e:
-                    self._log(f"⚠️ Error consultando {idcuenta}: {e}", "warning")
-                    continue
-            
-            self._log(f"✅ {len(cuentas_para_reprocesar)} cuentas para reprocesar")
-            
-            # ✅ EMITIR SIGNAL
-            if self.worker and cuentas_para_reprocesar:
-                self.worker.emit_data_imported(len(cuentas_para_reprocesar))
-                await asyncio.sleep(1)
-            
-            return cuentas_para_reprocesar
-            
-        except Exception as e:
-            self._log(f"❌ Error obteniendo cuentas EN PAUSA: {e}", "error")
-            return []
-    
-    def _consultar_estado_intentos_bd(self, idcuenta: str) -> Tuple[str, int]:
-        """✅ CORREGIDO: Método simple que sí funciona."""
-        try:
-            with self.db_manager.get_connection() as conn:
-                cursor = conn.execute("""
-                    SELECT estado, COALESCE(intentos, 0) as intentos 
-                    FROM cuenta_glosas_principal 
-                    WHERE idcuenta = ?
-                """, (idcuenta,))
-                
-                row = cursor.fetchone()
-                if row:
-                    return row['estado'], row['intentos']
-                else:
-                    return 'PENDIENTE', 0
-                    
-        except Exception as e:
-            self._log(f"❌ Error consultando BD {idcuenta}: {e}", "error")
-            return 'DESCONOCIDO', 0
-    
-    async def _incrementar_intentos_corregido(self, idcuenta: str):
-        """✅ CORREGIDO: Método simple que funciona."""
-        try:
-            with self.db_manager.get_connection() as conn:
-                # ✅ ASEGURAR que la columna intentos existe
-                conn.execute("""
-                    UPDATE cuenta_glosas_principal 
-                    SET intentos = COALESCE(intentos, 0) + 1, 
-                        estado = 'EN_PROCESO',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE idcuenta = ?
-                """, (idcuenta,))
-                conn.commit()
-                
-                self._log(f"🔢 Intentos incrementados para {idcuenta}")
-                
-                if self.worker:
-                    self.worker.emit_cuenta_processed(idcuenta, 'EN_PROCESO')
-                
-        except Exception as e:
-            self._log(f"❌ Error incrementando intentos {idcuenta}: {e}", "error")
-    
-    async def _manejar_fallo_con_intentos(self, idcuenta: str, intentos_actuales: int):
-        """✅ NUEVO: Maneja fallos con control de intentos."""
-        try:
-            if intentos_actuales >= 5:
-                await self._marcar_como_falla_total(idcuenta)
-                self._log(f"🚫 {idcuenta} FALLA TOTAL (5+ intentos)")
-            else:
-                await self._marcar_cuenta_fallida(idcuenta, f"Reintento {intentos_actuales}/5")
-                self._log(f"❌ {idcuenta} FALLÓ (intento {intentos_actuales}/5)")
-        except Exception as e:
-            self._log(f"❌ Error manejando fallo {idcuenta}: {e}", "error")
-    
-    async def _marcar_como_falla_total(self, idcuenta: str):
-        """✅ NUEVO: Marca como falla total."""
-        try:
-            with self.db_manager.get_connection() as conn:
-                conn.execute("""
-                    UPDATE cuenta_glosas_principal 
-                    SET estado = 'FALLA_TOTAL',
-                        motivo_fallo = 'Superó 5 intentos de procesamiento',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE idcuenta = ?
-                """, (idcuenta,))
-                conn.commit()
-                
-                if self.worker:
-                    self.worker.emit_cuenta_processed(idcuenta, 'FALLA_TOTAL')
-                
-        except Exception as e:
-            self._log(f"❌ Error marcando falla total {idcuenta}: {e}", "error")
