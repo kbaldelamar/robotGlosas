@@ -319,20 +319,20 @@ class GlosasEnPausaWidget(QWidget):
         """Crea el grupo de estadísticas EN PAUSA."""
         group = QGroupBox("Estadísticas de Cuentas EN PAUSA")
         layout = QHBoxLayout(group)
-        
-        # Etiquetas de estadísticas específicas para EN PAUSA
+
+        # ✅ ESTADÍSTICAS ACTUALIZADAS con FALLA_TOTAL
         self.stats_labels = {
             'fallidas': QLabel("Fallidas: 0"),
             'en_proceso': QLabel("En Proceso: 0"),
+            'falla_total': QLabel("Falla Total: 0"),  # ✅ NUEVO
             'total_en_pausa': QLabel("Total EN PAUSA: 0"),
-            'con_reintentos': QLabel("Con Reintentos: 0"),
             'listas_reprocesar': QLabel("Listas para Reprocesar: 0")
         }
-        
+
         for label in self.stats_labels.values():
             label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px;")
             layout.addWidget(label)
-        
+
         return group
     
     def create_progress_group(self) -> QGroupBox:
@@ -477,30 +477,24 @@ class GlosasEnPausaWidget(QWidget):
         """Actualiza las estadísticas mostradas para cuentas EN PAUSA."""
         try:
             with self.db_manager.get_connection() as conn:
-                # Estadísticas específicas para EN PAUSA
                 cursor = conn.execute("""
                     SELECT 
                         SUM(CASE WHEN estado = 'FALLIDO' THEN 1 ELSE 0 END) as fallidas,
                         SUM(CASE WHEN estado = 'EN_PROCESO' THEN 1 ELSE 0 END) as en_proceso,
+                        SUM(CASE WHEN estado = 'FALLA_TOTAL' THEN 1 ELSE 0 END) as falla_total,
                         SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') THEN 1 ELSE 0 END) as total_en_pausa,
-                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') AND intentos > 0 THEN 1 ELSE 0 END) as con_reintentos,
-                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') AND intentos < 3 THEN 1 ELSE 0 END) as listas_reprocesar
+                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') AND intentos < 5 THEN 1 ELSE 0 END) as listas_reprocesar
                     FROM cuenta_glosas_principal
                 """)
                 
                 row = cursor.fetchone()
                 
-                # Actualizar labels
+                # ✅ ACTUALIZAR LABELS con FALLA_TOTAL
                 self.stats_labels['fallidas'].setText(f"Fallidas: {row['fallidas'] or 0}")
                 self.stats_labels['en_proceso'].setText(f"En Proceso: {row['en_proceso'] or 0}")
+                self.stats_labels['falla_total'].setText(f"🚫 Falla Total: {row['falla_total'] or 0}")  # ✅ NUEVO
                 self.stats_labels['total_en_pausa'].setText(f"Total EN PAUSA: {row['total_en_pausa'] or 0}")
-                self.stats_labels['con_reintentos'].setText(f"Con Reintentos: {row['con_reintentos'] or 0}")
-                self.stats_labels['listas_reprocesar'].setText(f"Listas para Reprocesar: {row['listas_reprocesar'] or 0}")
-                
-                # Efecto visual de actualización
-                for label in self.stats_labels.values():
-                    label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px; background-color: #ffe8e8;")
-                    QTimer.singleShot(1000, lambda l=label: l.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px;"))
+                self.stats_labels['listas_reprocesar'].setText(f"✅ Listas: {row['listas_reprocesar'] or 0}")
                 
         except Exception as e:
             self.logger.error(f"Error actualizando estadísticas EN PAUSA: {e}")
