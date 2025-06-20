@@ -414,7 +414,6 @@ class ProcesadorCompletoGlosasImplementado:
                         FROM cuenta_glosas_principal 
                         WHERE estado = 'PENDIENTE'
                         ORDER BY created_at ASC
-                        LIMIT 20
                     """)
 
                     nuevas_pendientes = []
