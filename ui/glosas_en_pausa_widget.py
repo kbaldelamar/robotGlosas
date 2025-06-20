@@ -16,7 +16,6 @@ from config.settings import Settings
 class GlosasEnPausaAutomationWorker(QThread):
     """
     Worker thread para ejecutar automatización de glosas EN PAUSA sin bloquear la UI.
-    ✅ CORREGIDO: Compatible con nueva arquitectura de composición.
     """
     
     # Señales para comunicación con la UI
@@ -38,13 +37,12 @@ class GlosasEnPausaAutomationWorker(QThread):
     def run(self):
         """Ejecuta la automatización de glosas EN PAUSA en el hilo de trabajo."""
         try:
-            self.logger.info("Iniciando worker de automatización de glosas EN PAUSA con COMPOSICIÓN")
+            self.logger.info("Iniciando worker de automatización de glosas EN PAUSA")
             
             # Ejecutar automatización de glosas en pausa
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            # ✅ USAR NUEVO SCRAPER CON COMPOSICIÓN
             scraper = WebScraperGlosasEnPausa(worker_thread=self)
             success = loop.run_until_complete(
                 scraper.start_glosas_en_pausa_automation(self.username, self.password)
@@ -74,7 +72,6 @@ class GlosasEnPausaAutomationWorker(QThread):
 class GlosasEnPausaStatsTable(QTableWidget):
     """
     Tabla para mostrar estadísticas de cuentas EN PAUSA.
-    ✅ ACTUALIZADA: Incluye manejo de FALLA_TOTAL.
     """
     
     def __init__(self):
@@ -118,14 +115,18 @@ class GlosasEnPausaStatsTable(QTableWidget):
         self.setColumnWidth(6, 70)   # Intentos
         
     def load_data(self):
-        """Carga SOLO las cuentas EN PAUSA (FALLIDAS, EN_PROCESO y FALLA_TOTAL)."""
+        """Carga SOLO las cuentas EN PAUSA (FALLIDAS y EN_PROCESO)."""
         try:
             with self.db_manager.get_connection() as conn:
                 cursor = conn.execute("""
                     SELECT idcuenta, proveedor, estado, glosas_encontradas, 
                            glosas_procesadas, fecha_inicio, intentos, motivo_fallo
                     FROM cuenta_glosas_principal 
+<<<<<<< HEAD
                     WHERE estado IN ('FALLIDO', 'EN_PROCESO', 'FALLA_TOTAL')
+=======
+                    WHERE estado IN ('FALLIDO', 'EN_PROCESO') 
+>>>>>>> develop
                     ORDER BY intentos DESC, fecha_inicio DESC
                 """)
                 
@@ -136,22 +137,19 @@ class GlosasEnPausaStatsTable(QTableWidget):
                     self.setItem(row_idx, 0, QTableWidgetItem(str(row['idcuenta'])))
                     self.setItem(row_idx, 1, QTableWidgetItem(row['proveedor'] or ''))
                     
-                    # ✅ COLOREAR ESTADO: Incluir FALLA_TOTAL
+                    # Colorear estado según valor
                     estado_item = QTableWidgetItem(row['estado'])
                     if row['estado'] == 'FALLIDO':
                         estado_item.setBackground(Qt.GlobalColor.red)
                     elif row['estado'] == 'EN_PROCESO':
                         estado_item.setBackground(Qt.GlobalColor.yellow)
-                    elif row['estado'] == 'FALLA_TOTAL':
-                        estado_item.setBackground(Qt.GlobalColor.darkRed)  # ✅ NUEVO COLOR
-                        estado_item.setStyleSheet("color: white; font-weight: bold;")
                     
                     self.setItem(row_idx, 2, estado_item)
                     self.setItem(row_idx, 3, QTableWidgetItem(str(row['glosas_encontradas'])))
                     self.setItem(row_idx, 4, QTableWidgetItem(str(row['glosas_procesadas'])))
                     self.setItem(row_idx, 5, QTableWidgetItem(row['fecha_inicio'] or ''))
                     
-                    # ✅ COLOREAR INTENTOS según cantidad
+                    # Colorear intentos según cantidad
                     intentos_item = QTableWidgetItem(str(row['intentos']))
                     if row['intentos'] >= 5:
                         intentos_item.setBackground(Qt.GlobalColor.darkRed)
@@ -167,8 +165,8 @@ class GlosasEnPausaStatsTable(QTableWidget):
 
 class GlosasEnPausaWidget(QWidget):
     """
-    Widget para gestión de glosas EN PAUSA (FALLIDAS, EN_PROCESO y FALLA_TOTAL).
-    ✅ CORREGIDO: Compatible con nueva arquitectura de composición.
+    Widget para gestión de glosas EN PAUSA (FALLIDAS y EN_PROCESO).
+    Completamente separado del widget principal.
     """
     
     def __init__(self):
@@ -201,14 +199,14 @@ class GlosasEnPausaWidget(QWidget):
         splitter = QSplitter(Qt.Orientation.Vertical)
         
         # Widget de logs
-        log_group = QGroupBox("Log de Reprocesamiento EN PAUSA (Composición)")
+        log_group = QGroupBox("Log de Reprocesamiento EN PAUSA")
         log_layout = QVBoxLayout(log_group)
         self.log_widget = LogWidget()
         log_layout.addWidget(self.log_widget)
         splitter.addWidget(log_group)
         
         # Tabla de cuentas EN PAUSA
-        table_group = QGroupBox("Cuentas EN PAUSA (Fallidas, En Proceso y Falla Total)")
+        table_group = QGroupBox("Cuentas EN PAUSA (Fallidas y En Proceso)")
         table_layout = QVBoxLayout(table_group)
         self.stats_table = GlosasEnPausaStatsTable()
         table_layout.addWidget(self.stats_table)
@@ -251,7 +249,7 @@ class GlosasEnPausaWidget(QWidget):
     
     def create_control_group(self) -> QGroupBox:
         """Crea el grupo de controles de automatización."""
-        group = QGroupBox("🔄 Reprocesamiento de Glosas EN PAUSA (Arquitectura Composición)")
+        group = QGroupBox("🔄 Reprocesamiento de Glosas EN PAUSA")
         layout = QHBoxLayout(group)
         
         # Botón de inicio
@@ -333,32 +331,31 @@ class GlosasEnPausaWidget(QWidget):
     
     def create_stats_group(self) -> QGroupBox:
         """Crea el grupo de estadísticas EN PAUSA."""
-        group = QGroupBox("Estadísticas de Cuentas EN PAUSA (Incluye FALLA_TOTAL)")
+        group = QGroupBox("Estadísticas de Cuentas EN PAUSA")
         layout = QHBoxLayout(group)
-
-        # ✅ ESTADÍSTICAS COMPLETAS con FALLA_TOTAL
+        
+        # Etiquetas de estadísticas específicas para EN PAUSA
         self.stats_labels = {
             'fallidas': QLabel("❌ Fallidas: 0"),
             'en_proceso': QLabel("🔄 En Proceso: 0"),
-            'falla_total': QLabel("🚫 Falla Total: 0"),
             'total_en_pausa': QLabel("⏳ Total EN PAUSA: 0"),
-            'listas_reprocesar': QLabel("✅ Listas para Reprocesar: 0")
+            'intentos_1_2': QLabel("🟡 Intentos 1-2: 0"),
+            'intentos_3_4': QLabel("🟠 Intentos 3-4: 0"),
+            'intentos_5_mas': QLabel("🔴 Intentos 5+: 0")
         }
-
+        
         for key, label in self.stats_labels.items():
             label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px;")
-            # Colores específicos por estado
+            # Colores específicos por tipo
             if key == 'fallidas':
                 label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px; color: #d32f2f;")
             elif key == 'en_proceso':
                 label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px; color: #f57c00;")
-            elif key == 'falla_total':
-                label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px; color: #8b0000; background-color: #ffe6e6;")
-            elif key == 'listas_reprocesar':
-                label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px; color: #388e3c;")
+            elif key == 'intentos_5_mas':
+                label.setStyleSheet("font-weight: bold; padding: 5px; margin: 2px; color: #8b0000;")
             
             layout.addWidget(label)
-
+        
         return group
     
     def create_progress_group(self) -> QGroupBox:
@@ -372,7 +369,7 @@ class GlosasEnPausaWidget(QWidget):
         layout.addWidget(self.progress_bar)
         
         # Etiqueta de estado
-        self.status_label = QLabel("✅ Listo para reprocesar glosas EN PAUSA con arquitectura de composición")
+        self.status_label = QLabel("✅ Listo para reprocesar glosas EN PAUSA")
         layout.addWidget(self.status_label)
         
         return group
@@ -398,16 +395,16 @@ class GlosasEnPausaWidget(QWidget):
             )
             return
         
-        self.logger.info("🔄 Iniciando reprocesamiento EN PAUSA con arquitectura de COMPOSICIÓN")
+        self.logger.info("🔄 Iniciando reprocesamiento EN PAUSA")
         
         # Actualizar estado de la UI
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Progreso indeterminado
-        self.status_label.setText("🔄 Ejecutando reprocesamiento EN PAUSA con composición...")
+        self.status_label.setText("🔄 Ejecutando reprocesamiento EN PAUSA...")
         
-        # Crear y iniciar worker CON SIGNALS
+        # Crear y iniciar worker
         self.automation_worker = GlosasEnPausaAutomationWorker(username, password)
         
         # Conectar signals
@@ -420,18 +417,17 @@ class GlosasEnPausaWidget(QWidget):
         self.automation_worker.start()
         
     def on_data_imported(self, cantidad: int):
-        """Se ejecuta cuando se importan datos - ACTUALIZACIÓN INMEDIATA."""
+        """Se ejecuta cuando se importan datos."""
         self.logger.info(f"📊 Signal recibido: Identificadas {cantidad} cuentas EN PAUSA para reprocesar")
         self.update_stats()
         self.stats_table.load_data()
-        self.status_label.setText(f"✅ Identificadas {cantidad} cuentas EN PAUSA - Iniciando reprocesamiento con composición...")
+        self.status_label.setText(f"✅ Identificadas {cantidad} cuentas EN PAUSA - Iniciando reprocesamiento...")
     
     def on_cuenta_processed(self, idcuenta: str, estado: str):
         """Se ejecuta cuando se procesa una cuenta EN PAUSA."""
         emoji_map = {
             "COMPLETADO": "✅",
             "FALLIDO": "❌", 
-            "FALLA_TOTAL": "🚫",
             "EN_PROCESO": "🔄"
         }
         emoji = emoji_map.get(estado, "❓")
@@ -467,7 +463,6 @@ class GlosasEnPausaWidget(QWidget):
         
         total_recuperadas = self.get_total_recuperadas()
         total_en_pausa = self.get_total_en_pausa()
-        total_falla_total = self.get_total_falla_total()
         
         if success:
             self.status_label.setText(f"✅ Reprocesamiento completado - {total_recuperadas} recuperadas")
@@ -476,8 +471,7 @@ class GlosasEnPausaWidget(QWidget):
                 "Reprocesamiento Exitoso",
                 f"El reprocesamiento de glosas EN PAUSA se completó.\n\n"
                 f"✅ Recuperadas: {total_recuperadas}\n"
-                f"⏳ Aún EN PAUSA: {total_en_pausa}\n"
-                f"🚫 Falla Total: {total_falla_total}"
+                f"⏳ Aún EN PAUSA: {total_en_pausa}"
             )
         else:
             self.status_label.setText("❌ Error en reprocesamiento EN PAUSA")
@@ -516,20 +510,22 @@ class GlosasEnPausaWidget(QWidget):
                     SELECT 
                         SUM(CASE WHEN estado = 'FALLIDO' THEN 1 ELSE 0 END) as fallidas,
                         SUM(CASE WHEN estado = 'EN_PROCESO' THEN 1 ELSE 0 END) as en_proceso,
-                        SUM(CASE WHEN estado = 'FALLA_TOTAL' THEN 1 ELSE 0 END) as falla_total,
-                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO', 'FALLA_TOTAL') THEN 1 ELSE 0 END) as total_en_pausa,
-                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') AND COALESCE(intentos, 0) < 5 THEN 1 ELSE 0 END) as listas_reprocesar
+                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') THEN 1 ELSE 0 END) as total_en_pausa,
+                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') AND COALESCE(intentos, 0) BETWEEN 1 AND 2 THEN 1 ELSE 0 END) as intentos_1_2,
+                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') AND COALESCE(intentos, 0) BETWEEN 3 AND 4 THEN 1 ELSE 0 END) as intentos_3_4,
+                        SUM(CASE WHEN estado IN ('FALLIDO', 'EN_PROCESO') AND COALESCE(intentos, 0) >= 5 THEN 1 ELSE 0 END) as intentos_5_mas
                     FROM cuenta_glosas_principal
                 """)
                 
                 row = cursor.fetchone()
                 
-                # ✅ ACTUALIZAR LABELS con colores y nuevos datos
+                # Actualizar labels
                 self.stats_labels['fallidas'].setText(f"❌ Fallidas: {row['fallidas'] or 0}")
                 self.stats_labels['en_proceso'].setText(f"🔄 En Proceso: {row['en_proceso'] or 0}")
-                self.stats_labels['falla_total'].setText(f"🚫 Falla Total: {row['falla_total'] or 0}")
                 self.stats_labels['total_en_pausa'].setText(f"⏳ Total EN PAUSA: {row['total_en_pausa'] or 0}")
-                self.stats_labels['listas_reprocesar'].setText(f"✅ Listas: {row['listas_reprocesar'] or 0}")
+                self.stats_labels['intentos_1_2'].setText(f"🟡 Intentos 1-2: {row['intentos_1_2'] or 0}")
+                self.stats_labels['intentos_3_4'].setText(f"🟠 Intentos 3-4: {row['intentos_3_4'] or 0}")
+                self.stats_labels['intentos_5_mas'].setText(f"🔴 Intentos 5+: {row['intentos_5_mas'] or 0}")
                 
         except Exception as e:
             self.logger.error(f"Error actualizando estadísticas EN PAUSA: {e}")
@@ -556,20 +552,6 @@ class GlosasEnPausaWidget(QWidget):
                     SELECT COUNT(*) as count 
                     FROM cuenta_glosas_principal 
                     WHERE estado IN ('FALLIDO', 'EN_PROCESO')
-                """)
-                result = cursor.fetchone()
-                return result['count'] if result else 0
-        except Exception:
-            return 0
-    
-    def get_total_falla_total(self) -> int:
-        """Obtiene total de cuentas con FALLA_TOTAL desde BD."""
-        try:
-            with self.db_manager.get_connection() as conn:
-                cursor = conn.execute("""
-                    SELECT COUNT(*) as count 
-                    FROM cuenta_glosas_principal 
-                    WHERE estado = 'FALLA_TOTAL'
                 """)
                 result = cursor.fetchone()
                 return result['count'] if result else 0
