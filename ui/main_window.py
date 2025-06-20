@@ -10,6 +10,7 @@ from database.db_manager import DatabaseManager
 
 # *** NUEVO: Importar gestor de base de datos de glosas ***
 from database.db_manager_glosas import DatabaseManagerGlosas
+from ui.glosas_en_pausa_widget import GlosasEnPausaWidget
 from database.models import Cliente
 from config.settings import Settings
 
@@ -64,6 +65,9 @@ class MainWindow(QMainWindow):
         # Crear y agregar widgets (MANTENER NOMBRES ORIGINALES)
         self.glosas_widget = GlosasWidget()  # *** NOMBRE ORIGINAL ***
         self.stacked_widget.addWidget(self.glosas_widget)
+        
+        self.glosas_en_pausa_widget = GlosasEnPausaWidget()
+        self.stacked_widget.addWidget(self.glosas_en_pausa_widget)
         
         # Widget de placeholder para reportes (futuro)
         self.reports_widget = self.create_placeholder_widget("Módulo de Reportes")
@@ -148,6 +152,13 @@ class MainWindow(QMainWindow):
         gestion_action.setStatusTip('Abrir módulo de gestión de glosas')
         gestion_action.triggered.connect(lambda: self.switch_to_view(0))
         modules_menu.addAction(gestion_action)
+
+
+        en_pausa_action = QAction('🔄 Glosas en Pausa', self)
+        en_pausa_action.setShortcut(QKeySequence('Ctrl+P'))
+        en_pausa_action.setStatusTip('Reprocesar glosas fallidas y en proceso')
+        en_pausa_action.triggered.connect(lambda: self.switch_to_view(1))
+        modules_menu.addAction(en_pausa_action)
         
         # Separador
         modules_menu.addSeparator()
@@ -319,27 +330,53 @@ class MainWindow(QMainWindow):
     def switch_to_view(self, index: int):
         """
         Cambia a una vista específica.
-        
+
         Args:
             index (int): Índice de la vista en el stack widget
         """
         self.stacked_widget.setCurrentIndex(index)
-        
-        # Actualizar mensaje de estado según la vista
+
         view_names = {
-            0: "Gestión de Glosas (v2.0)",  # *** INDICAR VERSIÓN ***
-            1: "Reportes",
-            2: "Configuración"
+            0: "Gestión de Glosas",
+            1: "🔄 Glosas en Pausa",  # NUEVO
+            2: "Reportes",
+            3: "Configuración"
         }
-        
+
         view_name = view_names.get(index, "Desconocido")
-        
-        # Solo actualizar status bar si ya existe
+
         if hasattr(self, 'status_bar') and self.status_bar:
-            self.status_bar.showMessage(f"BootGestor v2.0 - Módulo: {view_name}")
-        
+            self.status_bar.showMessage(f"BootGestor v2.1 - Módulo: {view_name}")
+
         self.logger.info(f"Cambiado a módulo: {view_name}")
-    
+    def refresh_en_pausa_data(self):
+        """Actualiza los datos de glosas EN PAUSA."""
+        try:
+            if hasattr(self.glosas_en_pausa_widget, 'refresh_data'):
+                self.glosas_en_pausa_widget.refresh_data()
+                QMessageBox.information(
+                    self,
+                    "Datos EN PAUSA Actualizados",
+                    "Los datos de glosas EN PAUSA se han actualizado correctamente."
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Función No Disponible",
+                    "La función de actualización EN PAUSA aún no está disponible."
+                )
+            self.logger.info("🔄 Datos de glosas EN PAUSA actualizados")
+
+        except Exception as e:
+            self.logger.error(f"Error actualizando datos EN PAUSA: {e}")
+            QMessageBox.critical(
+                self,
+                "Error de Base de Datos",
+                f"No se pudieron actualizar los datos EN PAUSA: {str(e)}"
+            )
+
+    # En el método setup_menu(), AGREGAR en la sección de configuración:
+
     def show_url_config(self):
         """Muestra diálogo de configuración de URLs."""
         QMessageBox.information(
@@ -523,22 +560,33 @@ class MainWindow(QMainWindow):
             self,
             "Acerca de BootGestor",
             """
-            <h3>BootGestor v2.0 (Mejorado)</h3>
+            <h3>BootGestor v2.1 (Con Glosas en Pausa)</h3>
             <p>Sistema de automatización para gestión de glosas</p>
             
             <h4>Módulos Disponibles:</h4>
             <ul>
-            <li>✅ Gestión de Glosas (v2.0 con BD)</li>
+            <li>✅ Gestión de Glosas (Procesamiento principal)</li>
+            <li>✅ 🔄 Glosas en Pausa (Reprocesamiento) - <b>NUEVO</b></li>
             <li>🚧 Reportes (En desarrollo)</li>
-            <li>🚧 Auditoría (Planificado)</li>
             </ul>
             
-            <h4>Nuevas Funcionalidades v2.0:</h4>
+            <h4>Nuevas Funcionalidades v2.1:</h4>
             <ul>
-            <li>✅ Base de datos de glosas con estados</li>
-            <li>✅ Estadísticas en tiempo real</li>
-            <li>✅ Tabla de cuentas procesadas</li>
-            <li>✅ Control de procesamiento inteligente</li>
+            <li>✅ <b>Módulo Glosas en Pausa independiente</b></li>
+            <li>✅ Navegación específica a sección "En Pausa"</li>
+            <li>✅ Control de reintentos automático (máximo 5)</li>
+            <li>✅ Filtrado específico de cuentas fallidas</li>
+            <li>✅ Estadísticas de recuperación en tiempo real</li>
+            <li>✅ Arquitectura completamente separada</li>
+            </ul>
+            
+            <h4>Características Técnicas:</h4>
+            <ul>
+            <li>✅ Reutilización inteligente de componentes</li>
+            <li>✅ Base de datos con control de intentos</li>
+            <li>✅ Signals para actualización en tiempo real</li>
+            <li>✅ Separación completa de lógicas</li>
+            <li>✅ Navegación específica por módulo</li>
             </ul>
             
             <h4>Desarrollado con:</h4>

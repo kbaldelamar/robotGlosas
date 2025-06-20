@@ -344,3 +344,112 @@ class NavigationHandler:
             
         except Exception as e:
             self._log_state(f"Timeout esperando página: {e}", "warning")
+    async def navigate_to_en_pausa(self) -> bool:
+        """
+        Navega al submenú 'En Pausa' (debe estar en Respuesta Glosas primero).
+        NUEVO: Específico para el módulo de reprocesamiento.
+
+        Returns:
+            bool: True si la navegación fue exitosa
+        """
+        try:
+            self.state.update(
+                method_name="navigate_to_en_pausa",
+                action="Navegando a En Pausa"
+            )
+
+            self._log_state("Iniciando navegación a En Pausa")
+
+            # Verificar que estamos en el estado correcto
+            if self.state.current_state != NavigationState.RESPUESTA_GLOSAS_MENU:
+                self._log_state("No estamos en Respuesta Glosas, navegando primero...", "warning")
+                if not await self.navigate_to_respuesta_glosas():
+                    return False
+
+            # Actualizar información de página actual
+            await self._update_page_info()
+
+            # Selector específico para En Pausa
+            selector = "//span[@class='sidebar-nav-name'][contains(.,'En Pausa')]"
+
+            # Buscar el elemento
+            element = self.page.locator(f"xpath={selector}")
+
+            # Verificar que existe
+            if await element.count() == 0:
+                self._log_state("No se encontró el submenú 'En Pausa'", "error")
+                await self.page.screenshot(path="error_no_en_pausa_menu.png")
+                self.state.update(state=NavigationState.ERROR)
+                return False
+
+            self._log_state("Elemento 'En Pausa' encontrado")
+
+            # Hacer scroll al elemento si es necesario
+            await element.scroll_into_view_if_needed()
+            await asyncio.sleep(0.5)
+
+            # Hacer clic en "En Pausa"
+            await element.click()
+            self._log_state("Clic realizado en 'En Pausa'")
+
+            # Esperar a que cargue
+            await self.page.wait_for_load_state('networkidle', timeout=15000)
+            await asyncio.sleep(2)
+
+            # Verificar que la navegación fue exitosa
+            success = await self._verify_en_pausa_loaded()
+
+            if success:
+                self.state.update(
+                    action="Navegación a En Pausa exitosa"
+                )
+                self._log_state("Navegación a En Pausa completada exitosamente")
+                return True
+            else:
+                self.state.update(state=NavigationState.ERROR)
+                self._log_state("Falló la verificación de navegación a En Pausa", "error")
+                return False
+
+        except Exception as e:
+            self.state.update(state=NavigationState.ERROR)
+            self._log_state(f"Error navegando a En Pausa: {e}", "error")
+            await self.page.screenshot(path="error_navigate_en_pausa.png")
+            return False
+    
+    async def _verify_en_pausa_loaded(self) -> bool:
+        """
+        Verifica que la sección En Pausa se haya cargado correctamente.
+        
+        Returns:
+            bool: True si se cargó correctamente
+        """
+        try:
+            self.state.update(method_name="_verify_en_pausa_loaded")
+            
+            # Actualizar información de página
+            await self._update_page_info()
+            
+            # Verificar por URL
+            current_url = self.page.url
+            if 'pausa' in current_url.lower():
+                self._log_state(f"✅ En Pausa verificado por URL: {current_url}")
+                return True
+            
+            # Verificar por texto en la página
+            texto_elemento = self.page.locator("text=En Pausa")
+            if await texto_elemento.count() > 0:
+                self._log_state("✅ En Pausa verificado por texto en página")
+                return True
+            
+            # Verificar por tabla de glosas (mismo ID que Bolsa Respuesta)
+            tabla_glosas = self.page.locator("#tablaRespuestaGlosa")
+            if await tabla_glosas.count() > 0:
+                self._log_state("✅ En Pausa verificado por presencia de tabla")
+                return True
+            
+            self._log_state("❌ No se pudo verificar que En Pausa esté cargado", "warning")
+            return False
+            
+        except Exception as e:
+            self._log_state(f"Error verificando En Pausa: {e}", "error")
+            return False
