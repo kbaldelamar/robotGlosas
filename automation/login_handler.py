@@ -12,6 +12,12 @@ class LoginHandler:
     
     def __init__(self):
         """Inicializa el manejador de login."""
+        try:
+            from config.playwright_exe_config import setup_for_exe
+            setup_for_exe()
+        except: 
+            pass
+            
         self.logger = logging.getLogger(__name__)
         self.browser: Optional[Browser] = None
         self.page: Optional[Page] = None

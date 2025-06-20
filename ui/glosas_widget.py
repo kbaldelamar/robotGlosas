@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QHeaderView, QAbstractItemView)
 from PySide6.QtCore import Qt, QThread, QTimer ,Signal as pyqtSignal
 from ui.components.log_widget import LogWidget
-
+from PySide6.QtCore import QTimer
 
 
 
