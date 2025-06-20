@@ -1,14 +1,16 @@
+# ui/main_window.py
 import logging
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                             QMenuBar, QStatusBar, QStackedWidget, QPushButton,
                             QSplitter, QGroupBox, QMessageBox)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from ui.glosas_widget import GlosasWidget  # *** MANTENER NOMBRE ORIGINAL ***
+from ui.glosas_widget import GlosasWidget
+from ui.glosas_en_pausa_widget import GlosasEnPausaWidget  # ✅ NUEVO IMPORT
 from ui.components.client_table import ClientTable
 from database.db_manager import DatabaseManager
 
-# *** NUEVO: Importar gestor de base de datos de glosas ***
+# Importar gestor de base de datos de glosas
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models import Cliente
 from config.settings import Settings
@@ -17,7 +19,7 @@ class MainWindow(QMainWindow):
     """
     Ventana principal de la aplicación.
     Coordina todos los componentes y proporciona la interfaz principal.
-    *** ACTUALIZADO: Ahora incluye soporte para base de datos de glosas ***
+    ✅ ACTUALIZADO: Ahora incluye soporte para módulo "En Pausa"
     """
     
     def __init__(self):
@@ -25,7 +27,7 @@ class MainWindow(QMainWindow):
         self.logger = logging.getLogger(__name__)
         self.db_manager = DatabaseManager()
         
-        # *** NUEVO: Inicializar base de datos de glosas ***
+        # Inicializar base de datos de glosas
         try:
             self.db_manager_glosas = DatabaseManagerGlosas()
             self.db_manager_glosas.create_glosas_tables()
@@ -52,7 +54,7 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # Layout principal (sin botones de navegación)
+        # Layout principal
         main_layout = QVBoxLayout(central_widget)
         
         # Crear splitter principal
@@ -61,11 +63,16 @@ class MainWindow(QMainWindow):
         # Stack widget para diferentes vistas
         self.stacked_widget = QStackedWidget()
         
-        # Crear y agregar widgets (MANTENER NOMBRES ORIGINALES)
-        self.glosas_widget = GlosasWidget()  # *** NOMBRE ORIGINAL ***
+        # ✅ CREAR Y AGREGAR WIDGETS (AHORA 3 MÓDULOS)
+        # 0: Gestión de Glosas (original)
+        self.glosas_widget = GlosasWidget()
         self.stacked_widget.addWidget(self.glosas_widget)
         
-        # Widget de placeholder para reportes (futuro)
+        # 1: ✅ NUEVO - En Pausa (reprocesamiento)
+        self.glosas_en_pausa_widget = GlosasEnPausaWidget()
+        self.stacked_widget.addWidget(self.glosas_en_pausa_widget)
+        
+        # 2: Reportes (placeholder)
         self.reports_widget = self.create_placeholder_widget("Módulo de Reportes")
         self.stacked_widget.addWidget(self.reports_widget)
         
@@ -134,29 +141,36 @@ class MainWindow(QMainWindow):
         return widget
     
     def setup_menu(self):
-        """Configura la barra de menú con nueva estructura."""
+        """✅ CONFIGURACIÓN DE MENÚ ACTUALIZADA con En Pausa."""
         menubar = self.menuBar()
         
         # ===================================
-        # MENÚ MÓDULOS
+        # MENÚ MÓDULOS (ACTUALIZADO)
         # ===================================
         modules_menu = menubar.addMenu('Módulos')
         
-        # Submenu Gestión (lo que antes era "Gestión de Glosas")
+        # Gestión de Glosas (original)
         gestion_action = QAction('Gestión de Glosas', self)
         gestion_action.setShortcut(QKeySequence('Ctrl+G'))
         gestion_action.setStatusTip('Abrir módulo de gestión de glosas')
         gestion_action.triggered.connect(lambda: self.switch_to_view(0))
         modules_menu.addAction(gestion_action)
         
+        # ✅ NUEVO: En Pausa (reprocesamiento)
+        en_pausa_action = QAction('🔄 En Pausa (Reprocesar)', self)
+        en_pausa_action.setShortcut(QKeySequence('Ctrl+P'))
+        en_pausa_action.setStatusTip('Reprocesar glosas fallidas y en proceso')
+        en_pausa_action.triggered.connect(lambda: self.switch_to_view(1))
+        modules_menu.addAction(en_pausa_action)
+        
         # Separador
         modules_menu.addSeparator()
         
-        # Submenu Reportes
+        # Submenu Reportes (ahora índice 2)
         reports_action = QAction('Reportes', self)
         reports_action.setShortcut(QKeySequence('Ctrl+R'))
         reports_action.setStatusTip('Abrir módulo de reportes')
-        reports_action.triggered.connect(lambda: self.switch_to_view(1))
+        reports_action.triggered.connect(lambda: self.switch_to_view(2))  # ✅ CAMBIO: índice 2
         reports_action.setEnabled(True)  # Habilitado para mostrar placeholder
         modules_menu.addAction(reports_action)
         
@@ -172,7 +186,7 @@ class MainWindow(QMainWindow):
         # ===================================
         config_menu = menubar.addMenu('Configuración')
         
-        # Submenu Base de Datos (movido desde antes)
+        # Submenu Base de Datos
         db_submenu = config_menu.addMenu('Base de Datos')
         
         # Refrescar clientes
@@ -182,12 +196,19 @@ class MainWindow(QMainWindow):
         refresh_action.triggered.connect(self.refresh_clients)
         db_submenu.addAction(refresh_action)
         
-        # *** NUEVO: Refrescar datos de glosas ***
+        # Refrescar datos de glosas
         refresh_glosas_action = QAction('Refrescar Datos de Glosas', self)
         refresh_glosas_action.setShortcut(QKeySequence('Ctrl+F5'))
         refresh_glosas_action.setStatusTip('Actualizar datos de glosas')
         refresh_glosas_action.triggered.connect(self.refresh_glosas_data)
         db_submenu.addAction(refresh_glosas_action)
+        
+        # ✅ NUEVO: Refrescar datos EN PAUSA
+        refresh_en_pausa_action = QAction('🔄 Refrescar Datos EN PAUSA', self)
+        refresh_en_pausa_action.setShortcut(QKeySequence('Ctrl+Shift+F5'))
+        refresh_en_pausa_action.setStatusTip('Actualizar datos de glosas EN PAUSA')
+        refresh_en_pausa_action.triggered.connect(self.refresh_en_pausa_data)
+        db_submenu.addAction(refresh_en_pausa_action)
         
         # Agregar cliente (funcionalidad futura)
         add_client_action = QAction('Agregar Cliente', self)
@@ -302,8 +323,8 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         
-        # *** INDICAR QUE ES LA VERSIÓN MEJORADA ***
-        self.status_bar.showMessage("BootGestor v2.0 - Módulo: Gestión de Glosas (Mejorado)")
+        # Indicar que es la versión mejorada CON En Pausa
+        self.status_bar.showMessage("BootGestor v2.1 - Módulo: Gestión de Glosas (Con Reprocesamiento)")
         
         # Timer para actualizar estado periódicamente
         self.status_timer = QTimer()
@@ -318,25 +339,26 @@ class MainWindow(QMainWindow):
         
     def switch_to_view(self, index: int):
         """
-        Cambia a una vista específica.
+        ✅ ACTUALIZADO: Cambia a una vista específica (ahora 3 módulos).
         
         Args:
             index (int): Índice de la vista en el stack widget
         """
         self.stacked_widget.setCurrentIndex(index)
         
-        # Actualizar mensaje de estado según la vista
+        # ✅ ACTUALIZAR: Nombres de vistas con En Pausa
         view_names = {
-            0: "Gestión de Glosas (v2.0)",  # *** INDICAR VERSIÓN ***
-            1: "Reportes",
-            2: "Configuración"
+            0: "Gestión de Glosas (v2.1)",
+            1: "🔄 En Pausa (Reprocesamiento)",  # ✅ NUEVO
+            2: "Reportes",  # ✅ CAMBIO: índice 2
+            3: "Configuración"
         }
         
         view_name = view_names.get(index, "Desconocido")
         
         # Solo actualizar status bar si ya existe
         if hasattr(self, 'status_bar') and self.status_bar:
-            self.status_bar.showMessage(f"BootGestor v2.0 - Módulo: {view_name}")
+            self.status_bar.showMessage(f"BootGestor v2.1 - Módulo: {view_name}")
         
         self.logger.info(f"Cambiado a módulo: {view_name}")
     
@@ -412,11 +434,15 @@ class MainWindow(QMainWindow):
             
             # Actualizar mensaje de estado
             current_view = self.stacked_widget.currentIndex()
-            view_names = {0: "Gestión de Glosas (v2.0)", 1: "Reportes"}
+            view_names = {
+                0: "Gestión de Glosas (v2.1)", 
+                1: "🔄 En Pausa (Reprocesamiento)", 
+                2: "Reportes"
+            }
             view_name = view_names.get(current_view, "Módulo Actual")
             
             self.status_bar.showMessage(
-                f"BootGestor v2.0 - {view_name} | Clientes: {len(clients)}"
+                f"BootGestor v2.1 - {view_name} | Clientes: {len(clients)}"
             )
             
             self.logger.info(f"Lista de clientes actualizada: {len(clients)} registros")
@@ -430,7 +456,7 @@ class MainWindow(QMainWindow):
             )
     
     def refresh_glosas_data(self):
-        """*** NUEVO: Actualiza los datos de glosas ***"""
+        """Actualiza los datos de glosas."""
         try:
             if hasattr(self.glosas_widget, 'refresh_data'):
                 self.glosas_widget.refresh_data()
@@ -455,6 +481,32 @@ class MainWindow(QMainWindow):
                 f"No se pudieron actualizar los datos de glosas: {str(e)}"
             )
     
+    def refresh_en_pausa_data(self):
+        """✅ NUEVO: Actualiza los datos de glosas EN PAUSA."""
+        try:
+            if hasattr(self.glosas_en_pausa_widget, 'refresh_data'):
+                self.glosas_en_pausa_widget.refresh_data()
+                QMessageBox.information(
+                    self,
+                    "Datos EN PAUSA Actualizados",
+                    "Los datos de glosas EN PAUSA se han actualizado correctamente."
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Función No Disponible",
+                    "La función de actualización EN PAUSA aún no está disponible."
+                )
+            self.logger.info("🔄 Datos de glosas EN PAUSA actualizados")
+            
+        except Exception as e:
+            self.logger.error(f"Error actualizando datos EN PAUSA: {e}")
+            QMessageBox.critical(
+                self,
+                "Error de Base de Datos",
+                f"No se pudieron actualizar los datos EN PAUSA: {str(e)}"
+            )
+    
     def on_client_selected(self, client: Cliente):
         """
         Maneja la selección de un cliente.
@@ -463,11 +515,15 @@ class MainWindow(QMainWindow):
             client (Cliente): Cliente seleccionado
         """
         current_view = self.stacked_widget.currentIndex()
-        view_names = {0: "Gestión de Glosas (v2.0)", 1: "Reportes"}
+        view_names = {
+            0: "Gestión de Glosas (v2.1)", 
+            1: "🔄 En Pausa (Reprocesamiento)", 
+            2: "Reportes"
+        }
         view_name = view_names.get(current_view, "Módulo Actual")
         
         self.status_bar.showMessage(
-            f"BootGestor v2.0 - {view_name} | Cliente: {client.nombre}"
+            f"BootGestor v2.1 - {view_name} | Cliente: {client.nombre}"
         )
         
         self.logger.info(f"Cliente seleccionado: {client.nombre} (ID: {client.id})")
@@ -508,37 +564,52 @@ class MainWindow(QMainWindow):
         try:
             client_count = len(self.db_manager.get_all_clients())
             current_view = self.stacked_widget.currentIndex()
-            view_names = {0: "Gestión de Glosas (v2.0)", 1: "Reportes"}
+            view_names = {
+                0: "Gestión de Glosas (v2.1)", 
+                1: "🔄 En Pausa (Reprocesamiento)", 
+                2: "Reportes"
+            }
             view_name = view_names.get(current_view, "Módulo Actual")
             
             self.status_bar.showMessage(
-                f"BootGestor v2.0 - {view_name} | Clientes: {client_count}"
+                f"BootGestor v2.1 - {view_name} | Clientes: {client_count}"
             )
         except Exception as e:
             self.logger.error(f"Error actualizando estado: {e}")
     
     def show_about(self):
-        """Muestra el diálogo Acerca de."""
+        """✅ ACTUALIZADO: Muestra el diálogo Acerca de con En Pausa."""
         QMessageBox.about(
             self,
             "Acerca de BootGestor",
             """
-            <h3>BootGestor v2.0 (Mejorado)</h3>
+            <h3>BootGestor v2.1 (Con Reprocesamiento)</h3>
             <p>Sistema de automatización para gestión de glosas</p>
             
             <h4>Módulos Disponibles:</h4>
             <ul>
-            <li>✅ Gestión de Glosas (v2.0 con BD)</li>
+            <li>✅ Gestión de Glosas (v2.1 con BD)</li>
+            <li>✅ 🔄 En Pausa (Reprocesamiento) - <b>NUEVO</b></li>
             <li>🚧 Reportes (En desarrollo)</li>
             <li>🚧 Auditoría (Planificado)</li>
             </ul>
             
-            <h4>Nuevas Funcionalidades v2.0:</h4>
+            <h4>Nuevas Funcionalidades v2.1:</h4>
+            <ul>
+            <li>✅ <b>Módulo En Pausa para reprocesar fallidas</b></li>
+            <li>✅ Navegación a sección "En Pausa"</li>
+            <li>✅ Control de reintentos automático</li>
+            <li>✅ Filtrado específico de cuentas fallidas</li>
+            <li>✅ Estadísticas de recuperación</li>
+            </ul>
+            
+            <h4>Características Técnicas:</h4>
             <ul>
             <li>✅ Base de datos de glosas con estados</li>
             <li>✅ Estadísticas en tiempo real</li>
             <li>✅ Tabla de cuentas procesadas</li>
             <li>✅ Control de procesamiento inteligente</li>
+            <li>✅ Signals para actualización automática</li>
             </ul>
             
             <h4>Desarrollado con:</h4>
@@ -564,7 +635,7 @@ class MainWindow(QMainWindow):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            self.logger.info("Cerrando aplicación BootGestor v2.0")
+            self.logger.info("Cerrando aplicación BootGestor v2.1 con En Pausa")
             event.accept()
         else:
             event.ignore()
