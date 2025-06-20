@@ -439,174 +439,208 @@ class NavigationHandlerEnPausa(NavigationHandler):
 
 class ProcesadorCompletoEnPausa(ProcesadorCompletoGlosasImplementado):
     """
-    Extensión del procesador para manejar específicamente cuentas EN PAUSA.
+    ✅ CORREGIDO: Procesador EN PAUSA que REUTILIZA todos los métodos existentes.
     """
     
-    async def procesar_filas_tabla_en_pausa(self) -> Tuple[int, int]:  # ✅ CORREGIDO PARA PYTHON 3.8
+    async def procesar_filas_tabla_en_pausa(self) -> Tuple[int, int]:
         """
-        MÉTODO PRINCIPAL MODIFICADO: Procesa solo cuentas EN PAUSA.
-        
-        Returns:
-            Tuple[int, int]: (cuentas_procesadas, cuentas_fallidas)
+        ✅ CORREGIDO: Usa métodos existentes de la clase padre.
         """
         try:
             self.state.update(
                 method_name="procesar_filas_tabla_en_pausa",
-                action="Procesando filas EN PAUSA específicamente"
+                action="Procesando EN PAUSA con métodos existentes"
             )
             
             self.estadisticas['tiempo_inicio'] = asyncio.get_event_loop().time()
             
-            self._log("🔄 === INICIANDO PROCESAMIENTO EN PAUSA ===")
-            self._log("🎯 OBJETIVO: Solo cuentas FALLIDAS y EN_PROCESO")
+            self._log("🔄 === PROCESAMIENTO EN PAUSA CORREGIDO ===")
+            self._log("✅ REUTILIZA: Métodos de ProcesadorCompletoGlosasImplementado")
             self._log("=" * 100)
             
-            # PASO 1: Preparar sistema
+            # ✅ PASO 1: Preparar sistema (método existente)
             if not await self._preparar_sistema():
                 return 0, 0
             
-            # PASO 2: Obtener SOLO cuentas EN PAUSA
-            cuentas_en_pausa = await self._obtener_cuentas_en_pausa()
+            # ✅ PASO 2: USAR MÉTODO EXISTENTE para extraer tabla
+            cuentas_en_pausa = await self._obtener_cuentas_en_pausa_corregido()
             
             if not cuentas_en_pausa:
                 self._log("⚠️ No hay cuentas EN PAUSA para reprocesar", "warning")
                 return 0, 0
             
-            # PASO 3: Procesar cada cuenta EN PAUSA
+            # ✅ PASO 3: Procesar usando método COMPLETO existente
             cuentas_procesadas = 0
             cuentas_fallidas = 0
             
             for i, cuenta_data in enumerate(cuentas_en_pausa):
                 idcuenta = cuenta_data['idcuenta']
+                intentos_actuales = cuenta_data.get('intentos_bd', 0)
                 
-                self._log("")
-                self._log(f"🔄 REPROCESANDO CUENTA EN PAUSA {i + 1}/{len(cuentas_en_pausa)}: {idcuenta}")
-                self._log(f"   Estado actual: {cuenta_data.get('estado', 'N/A')}")
-                self._log(f"   Intentos previos: {cuenta_data.get('intentos', 0)}")
-                self._log("-" * 60)
+                self._log(f"🔄 REPROCESANDO {i + 1}/{len(cuentas_en_pausa)}: {idcuenta} (intentos: {intentos_actuales})")
                 
                 try:
-                    # ✅ INCREMENTAR CONTADOR DE INTENTOS
-                    await self._incrementar_intentos(idcuenta)
+                    # ✅ VERIFICAR LÍMITE ANTES DE PROCESAR
+                    if intentos_actuales >= 5:
+                        await self._marcar_como_falla_total(idcuenta)
+                        cuentas_fallidas += 1
+                        continue
                     
-                    # Procesar cuenta completa
+                    # ✅ INCREMENTAR INTENTOS
+                    await self._incrementar_intentos_corregido(idcuenta)
+                    
+                    # ✅ USAR MÉTODO COMPLETO EXISTENTE (sin modificar)
                     resultado = await self._procesar_cuenta_completa(idcuenta)
                     
                     if resultado['exito']:
                         cuentas_procesadas += 1
                         self.estadisticas['cuentas_procesadas'] += 1
-                        self.estadisticas['glosas_procesadas'] += resultado.get('glosas_procesadas', 0)
-                        
-                        self._log(f"✅ CUENTA EN PAUSA {idcuenta} RECUPERADA")
-                        self._log(f"   • Glosas procesadas: {resultado.get('glosas_procesadas', 0)}")
+                        self._log(f"✅ CUENTA {idcuenta} RECUPERADA")
                     else:
-                        error_msg = resultado.get('error', 'Error desconocido en reprocesamiento')
-                        
-                        # Marcar como fallida nuevamente
-                        estado_actual = self.db_manager.get_cuenta_estado(idcuenta)
-                        if estado_actual != EstadoCuenta.FALLIDO:
-                            await self._marcar_cuenta_fallida(idcuenta, f"Reintento fallido: {error_msg}")
-                        
+                        # Control de intentos después de fallar
+                        await self._manejar_fallo_con_intentos(idcuenta, intentos_actuales + 1)
                         cuentas_fallidas += 1
                         self.estadisticas['cuentas_fallidas'] += 1
-                        
-                        self._log(f"❌ CUENTA EN PAUSA {idcuenta} SIGUE FALLANDO: {error_msg[:100]}...")
                 
                 except Exception as e:
-                    error_msg = f"Error general reprocesando cuenta EN PAUSA {idcuenta}: {e}"
-                    self._log(error_msg, "error")
-                    
-                    # Marcar como fallida y regresar a tabla principal
-                    await self._marcar_cuenta_fallida(idcuenta, error_msg)
+                    await self._manejar_fallo_con_intentos(idcuenta, intentos_actuales + 1)
                     await self._regresar_tabla_principal()
-                    
                     cuentas_fallidas += 1
-                    self.estadisticas['cuentas_fallidas'] += 1
                 
-                # Pausa entre cuentas
                 await asyncio.sleep(3)
-                
-                # Log de progreso
-                if (i + 1) % 2 == 0:
-                    porcentaje = ((i + 1) / len(cuentas_en_pausa)) * 100
-                    self._log(f"📊 PROGRESO EN PAUSA: {i + 1}/{len(cuentas_en_pausa)} ({porcentaje:.1f}%)")
             
             self.estadisticas['tiempo_fin'] = asyncio.get_event_loop().time()
-            
-            # Mostrar estadísticas finales
             await self._mostrar_estadisticas_finales()
-            
-            self._log("=" * 100)
-            self._log("🎉 PROCESAMIENTO EN PAUSA TERMINADO")
             
             return cuentas_procesadas, cuentas_fallidas
             
         except Exception as e:
-            self._log(f"❌ Error crítico en procesamiento EN PAUSA: {e}", "error")
+            self._log(f"❌ Error crítico EN PAUSA: {e}", "error")
             return 0, 0
     
-    async def _obtener_cuentas_en_pausa(self) -> List[Dict]:  # ✅ CORREGIDO PARA PYTHON 3.8
+    async def _obtener_cuentas_en_pausa_corregido(self) -> List[Dict]:
         """
-        Obtiene SOLO cuentas que están EN PAUSA (FALLIDAS y EN_PROCESO).
-        
-        Returns:
-            List[Dict]: Lista de cuentas EN PAUSA
+        ✅ CORREGIDO: Reutiliza método existente + filtra por intentos.
         """
         try:
-            self._log("📋 Obteniendo cuentas EN PAUSA para reprocesamiento")
+            self._log("📋 Extrayendo cuentas de tabla EN PAUSA (método corregido)")
             
-            cuentas_en_pausa = []
+            # ✅ REUTILIZAR método existente que SÍ funciona
+            todas_las_cuentas = await self.extraer_datos_filas_tabla()
             
-            try:
-                with self.db_manager.get_connection() as conn:
-                    cursor = conn.execute("""
-                        SELECT idcuenta, proveedor, estado, valor_glosado, 
-                               fecha_radicacion, intentos
-                        FROM cuenta_glosas_principal 
-                        WHERE estado IN ('FALLIDO', 'EN_PROCESO')
-                        AND intentos < 5  -- Limitar reintentos
-                        ORDER BY intentos ASC, created_at ASC
-                    """)
+            if not todas_las_cuentas:
+                self._log("❌ No se extrajeron cuentas de tabla", "error")
+                return []
+            
+            # ✅ FILTRAR por BD e intentos
+            cuentas_para_reprocesar = []
+            
+            for cuenta_web in todas_las_cuentas:
+                idcuenta = cuenta_web['idcuenta']
+                
+                try:
+                    # Consultar BD
+                    estado_bd, intentos_bd = self._consultar_estado_intentos_bd(idcuenta)
                     
-                    for row in cursor.fetchall():
-                        cuentas_en_pausa.append({
-                            'idcuenta': row['idcuenta'],
-                            'proveedor': row['proveedor'],
-                            'estado': row['estado'],
-                            'valor_glosado': row['valor_glosado'],
-                            'fecha_radicacion': row['fecha_radicacion'],
-                            'intentos': row['intentos']
-                        })
-                    
-                    self._log(f"🔍 Encontradas {len(cuentas_en_pausa)} cuentas EN PAUSA en BD")
+                    # ✅ FILTRO ESPECÍFICO EN PAUSA
+                    if estado_bd in ['FALLIDO', 'EN_PROCESO'] and intentos_bd < 5:
+                        cuenta_web['estado_bd'] = estado_bd
+                        cuenta_web['intentos_bd'] = intentos_bd
+                        cuentas_para_reprocesar.append(cuenta_web)
+                        
+                        self._log(f"✅ {idcuenta} elegible: {estado_bd} (intentos: {intentos_bd})")
+                    else:
+                        if intentos_bd >= 5:
+                            self._log(f"⏭️ {idcuenta} saltada: +5 intentos")
+                        else:
+                            self._log(f"⏭️ {idcuenta} saltada: estado {estado_bd}")
+                
+                except Exception as e:
+                    self._log(f"⚠️ Error consultando {idcuenta}: {e}", "warning")
+                    continue
             
-            except Exception as e:
-                self._log(f"⚠️ Error consultando BD EN PAUSA: {e}", "warning")
+            self._log(f"✅ {len(cuentas_para_reprocesar)} cuentas para reprocesar")
             
-            # Emitir signal de datos importados
-            if self.worker and cuentas_en_pausa:
-                self.worker.emit_data_imported(len(cuentas_en_pausa))
+            # ✅ EMITIR SIGNAL
+            if self.worker and cuentas_para_reprocesar:
+                self.worker.emit_data_imported(len(cuentas_para_reprocesar))
                 await asyncio.sleep(1)
             
-            return cuentas_en_pausa
+            return cuentas_para_reprocesar
             
         except Exception as e:
             self._log(f"❌ Error obteniendo cuentas EN PAUSA: {e}", "error")
             return []
     
-    async def _incrementar_intentos(self, idcuenta: str):
-        """Incrementa el contador de intentos para una cuenta."""
+    def _consultar_estado_intentos_bd(self, idcuenta: str) -> Tuple[str, int]:
+        """✅ CORREGIDO: Método simple que sí funciona."""
         try:
             with self.db_manager.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT estado, COALESCE(intentos, 0) as intentos 
+                    FROM cuenta_glosas_principal 
+                    WHERE idcuenta = ?
+                """, (idcuenta,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return row['estado'], row['intentos']
+                else:
+                    return 'PENDIENTE', 0
+                    
+        except Exception as e:
+            self._log(f"❌ Error consultando BD {idcuenta}: {e}", "error")
+            return 'DESCONOCIDO', 0
+    
+    async def _incrementar_intentos_corregido(self, idcuenta: str):
+        """✅ CORREGIDO: Método simple que funciona."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                # ✅ ASEGURAR que la columna intentos existe
                 conn.execute("""
                     UPDATE cuenta_glosas_principal 
-                    SET intentos = intentos + 1, 
+                    SET intentos = COALESCE(intentos, 0) + 1, 
+                        estado = 'EN_PROCESO',
                         updated_at = CURRENT_TIMESTAMP
                     WHERE idcuenta = ?
                 """, (idcuenta,))
                 conn.commit()
                 
-                self._log(f"🔢 Intentos incrementados para cuenta {idcuenta}")
+                self._log(f"🔢 Intentos incrementados para {idcuenta}")
+                
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'EN_PROCESO')
                 
         except Exception as e:
-            self._log(f"❌ Error incrementando intentos para {idcuenta}: {e}", "error")
+            self._log(f"❌ Error incrementando intentos {idcuenta}: {e}", "error")
+    
+    async def _manejar_fallo_con_intentos(self, idcuenta: str, intentos_actuales: int):
+        """✅ NUEVO: Maneja fallos con control de intentos."""
+        try:
+            if intentos_actuales >= 5:
+                await self._marcar_como_falla_total(idcuenta)
+                self._log(f"🚫 {idcuenta} FALLA TOTAL (5+ intentos)")
+            else:
+                await self._marcar_cuenta_fallida(idcuenta, f"Reintento {intentos_actuales}/5")
+                self._log(f"❌ {idcuenta} FALLÓ (intento {intentos_actuales}/5)")
+        except Exception as e:
+            self._log(f"❌ Error manejando fallo {idcuenta}: {e}", "error")
+    
+    async def _marcar_como_falla_total(self, idcuenta: str):
+        """✅ NUEVO: Marca como falla total."""
+        try:
+            with self.db_manager.get_connection() as conn:
+                conn.execute("""
+                    UPDATE cuenta_glosas_principal 
+                    SET estado = 'FALLA_TOTAL',
+                        motivo_fallo = 'Superó 5 intentos de procesamiento',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE idcuenta = ?
+                """, (idcuenta,))
+                conn.commit()
+                
+                if self.worker:
+                    self.worker.emit_cuenta_processed(idcuenta, 'FALLA_TOTAL')
+                
+        except Exception as e:
+            self._log(f"❌ Error marcando falla total {idcuenta}: {e}", "error")

@@ -9,6 +9,7 @@ class EstadoCuenta(Enum):
     EN_PROCESO = "EN_PROCESO"
     COMPLETADO = "COMPLETADO"
     FALLIDO = "FALLIDO"
+    FALLA_TOTAL = "FALLA_TOTAL"  # ✅ NUEVO: Para 5+ intentos
 
 @dataclass
 class CuentaGlosasPrincipal:
