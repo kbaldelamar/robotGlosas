@@ -28,7 +28,10 @@ class GlosasAutomationWorker(QThread):
         self.logger = logging.getLogger(__name__)
         
     def run(self):
-        """Ejecuta la automatización de glosas en el hilo de trabajo."""
+        """Ejecuta la automatización de glosas en el hilo de trabajo.        
+        
+        
+        """
         try:
             self.logger.info("Iniciando worker de automatización de glosas")
             
