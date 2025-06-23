@@ -11,6 +11,8 @@ from ui.components.log_widget import LogWidget
 from automation.web_scraper_glosas_en_pausa import WebScraperGlosasEnPausa
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import CuentaGlosasPrincipal, EstadoCuenta
+from automation.web_scraper_glosas_en_pausa_actualizado import WebScraperGlosasEnPausaActualizado
+
 from config.settings import Settings
 
 class GlosasEnPausaAutomationWorker(QThread):
@@ -37,13 +39,14 @@ class GlosasEnPausaAutomationWorker(QThread):
     def run(self):
         """Ejecuta la automatización de glosas EN PAUSA en el hilo de trabajo."""
         try:
-            self.logger.info("Iniciando worker de automatización de glosas EN PAUSA")
+            self.logger.info("Iniciando worker de automatización de glosas EN PAUSA con HERENCIA")
             
             # Ejecutar automatización de glosas en pausa
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            scraper = WebScraperGlosasEnPausa(worker_thread=self)
+            # ✅ CAMBIO: Usar la versión actualizada con herencia
+            scraper = WebScraperGlosasEnPausaActualizado(worker_thread=self)  # <-- CAMBIO AQUÍ
             success = loop.run_until_complete(
                 scraper.start_glosas_en_pausa_automation(self.username, self.password)
             )
@@ -53,9 +56,9 @@ class GlosasEnPausaAutomationWorker(QThread):
             self.automation_finished.emit(success)
             
         except Exception as e:
-            self.logger.error(f"Error en worker de automatización de glosas EN PAUSA: {e}")
+            self.logger.error(f"Error en worker de automatización de glosas EN PAUSA con herencia: {e}")
             self.automation_finished.emit(False)
-    
+        
     # Métodos para emitir signals
     def emit_data_imported(self, cantidad: int):
         """Emite signal cuando se importan datos."""
