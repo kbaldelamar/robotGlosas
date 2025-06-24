@@ -99,7 +99,6 @@ class ProcesadorCompletoGlosasImplementado:
     async def procesar_filas_tabla(self) -> Tuple[int, int]:
         """
         MÉTODO PRINCIPAL: Procesa todas las cuentas de la tabla principal.
-
         Returns:
             Tuple[int, int]: (cuentas_procesadas, cuentas_fallidas)
         """
@@ -108,88 +107,81 @@ class ProcesadorCompletoGlosasImplementado:
                 method_name="procesar_filas_tabla",
                 action="Iniciando procesamiento completo implementado"
             )
-
             self.estadisticas['tiempo_inicio'] = asyncio.get_event_loop().time()
-
             self._log("🚀 === INICIANDO PROCESAMIENTO COMPLETO IMPLEMENTADO ===")
             self._log("=" * 100)
-
+    
             # PASO 1: Preparar sistema
             if not await self._preparar_sistema():
                 return 0, 0
-
+    
             # PASO 2: Obtener cuentas pendientes
             cuentas_pendientes = await self._obtener_cuentas_pendientes()
-
             if not cuentas_pendientes:
                 self._log("⚠️ No hay cuentas pendientes para procesar", "warning")
                 return 0, 0
-
+    
             # PASO 3: Procesar cada cuenta completa
             cuentas_procesadas = 0
             cuentas_fallidas = 0
-
+    
             for i, cuenta_data in enumerate(cuentas_pendientes):
+                # Revisa si el usuario pulsó "Detener"
+                if self.worker and hasattr(self.worker, "_should_stop") and self.worker._should_stop:
+                    self._log("🛑 Proceso detenido por el usuario.", "warning")
+                    break
+                
                 idcuenta = cuenta_data['idcuenta']
-
                 self._log("")
                 self._log(f"🎯 PROCESANDO CUENTA {i + 1}/{len(cuentas_pendientes)}: {idcuenta}")
                 self._log("-" * 60)
-
                 try:
                     # Procesar cuenta completa
                     resultado = await self._procesar_cuenta_completa(idcuenta)
-
                     if resultado['exito']:
                         cuentas_procesadas += 1
                         self.estadisticas['cuentas_procesadas'] += 1
                         self.estadisticas['glosas_procesadas'] += resultado.get('glosas_procesadas', 0)
-
                         self._log(f"✅ CUENTA {idcuenta} COMPLETADA")
                         self._log(f"   • Glosas procesadas: {resultado.get('glosas_procesadas', 0)}")
                     else:
-                        # ✅ MEJORADO: Asegurar que se marque como FALLIDO si no fue exitoso
                         error_msg = resultado.get('error', 'Error desconocido en procesamiento')
-
-                        # Verificar si ya se marcó como fallida, si no, marcarla
                         estado_actual = self.db_manager.get_cuenta_estado(idcuenta)
                         if estado_actual != EstadoCuenta.FALLIDO:
                             await self._marcar_cuenta_fallida(idcuenta, error_msg)
-
                         cuentas_fallidas += 1
                         self.estadisticas['cuentas_fallidas'] += 1
-
                         self._log(f"❌ CUENTA {idcuenta} FALLÓ: {error_msg[:100]}...")
-
                 except Exception as e:
                     error_msg = f"Error general procesando cuenta {idcuenta}: {e}"
                     self._log(error_msg, "error")
-
-                    # Marcar como fallida y regresar a tabla principal
+                    # SOLO DETÉN EL PROCESO SI EL NAVEGADOR SE CERRÓ
+                    if "Target page, context or browser has been closed" in str(e):
+                        self._log("🚨 Navegador/contexto cerrado. Deteniendo procesamiento de cuentas.", "error")
+                        if self.worker and hasattr(self.worker, "stop"):
+                            self.worker.stop()
+                        break
+                    # Si no es cierre de navegador, sigue con el manejo normal
                     await self._marcar_cuenta_fallida(idcuenta, error_msg)
-                    await self._regresar_tabla_principal()
-
+                    try:
+                        await self._regresar_tabla_principal()
+                    except Exception as e2:
+                        self._log(f"❌ Error regresando a tabla principal: {e2}", "error")
                     cuentas_fallidas += 1
                     self.estadisticas['cuentas_fallidas'] += 1
-
-                # Pausa entre cuentas
                 await asyncio.sleep(3)
-
+    
                 # Log de progreso
                 if (i + 1) % 3 == 0:
                     porcentaje = ((i + 1) / len(cuentas_pendientes)) * 100
                     self._log(f"📊 PROGRESO: {i + 1}/{len(cuentas_pendientes)} ({porcentaje:.1f}%)")
-
+    
             self.estadisticas['tiempo_fin'] = asyncio.get_event_loop().time()
-
-            # Mostrar estadísticas finales
             await self._mostrar_estadisticas_finales()
-
             self._log("=" * 100)
             self._log("🎉 PROCESAMIENTO COMPLETO IMPLEMENTADO TERMINADO")
-
             return cuentas_procesadas, cuentas_fallidas
-
+    
         except Exception as e:
             self._log(f"❌ Error crítico en procesamiento: {e}", "error")
             return 0, 0
@@ -540,12 +532,12 @@ class ProcesadorCompletoGlosasImplementado:
         except Exception as e:
             self._log(f"⚠️ Error parseando moneda '{valor}': {e}", "warning")
             return 0.0
-
+    """
     async def _procesar_todas_las_glosas_cuenta(self, idcuenta: str) -> Dict:
-        """
+    
         ✅ MODIFICAR ESTE MÉTODO (no _procesar_cuenta_completa)
         Procesa todas las glosas de una cuenta con verificación previa de configuraciones.
-        """
+        
         try:
             self._log(f"📋 Procesando todas las glosas de cuenta {idcuenta}")
 
@@ -636,6 +628,7 @@ class ProcesadorCompletoGlosasImplementado:
             error_msg = f"Error procesando glosas de cuenta {idcuenta}: {e}"
             self._log(error_msg, "error")
             return {'exito': False, 'error': error_msg}
+    """
     async def _guardar_glosas_sin_configuracion(self, idcuenta: str, glosas_sin_config: List[Dict]):
         """
         ✅ CORREGIDO: Usar nombres correctos de campos
@@ -688,6 +681,17 @@ class ProcesadorCompletoGlosasImplementado:
             if not await self._esperar_modal_abierto(id_glosa):
                 return {'exito': False, 'error': 'Modal no se abrió correctamente'}
             
+            # Capturar el número de factura del modal antes de hacer scroll
+            
+            num_factura_elem = self.page.locator("//div//label[@class='form-label'][contains(., 'Nro Factura')]/following-sibling::div[@id='numFactura']")
+            num_factura = ""
+            if await num_factura_elem.count() > 0:
+                num_factura = (await num_factura_elem.text_content()).strip()
+                self._log(f"📄 Número de factura capturado: {num_factura}")
+            else:
+                self._log("⚠️ No se pudo capturar el número de factura en el modal", "warning")
+            glosa_info['num_factura'] = num_factura
+
             # ✅ PASO 3: ÚNICA LÍNEA A CAMBIAR - Usar método que SÍ existe
             configuracion = self._buscar_configuracion_glosa(tipo, justificacion)
             
@@ -709,33 +713,34 @@ class ProcesadorCompletoGlosasImplementado:
                         
                 return {'exito': False, 'error': 'Sin configuración disponible', 'sin_config': True}
             
-            # PASO 4: Llenar campos del modal
-            if not await self._llenar_modal_respuesta(configuracion):
+                # PASO 4: Llenar campos del modal y subir PDF
+            if not await self._llenar_modal_respuesta(configuracion, glosa_info):
                 await self._cerrar_modal()
+                await self._guardar_glosa_fallida(glosa_info.get('idcuenta', ''), glosa_info, "Error llenando campos del modal")
                 return {'exito': False, 'error': 'Error llenando campos del modal'}
-            
+
             # PASO 5: Guardar respuesta
             if not await self._guardar_respuesta_modal():
                 await self._cerrar_modal()
+                await self._guardar_glosa_fallida(glosa_info.get('idcuenta', ''), glosa_info, "Error guardando respuesta")
                 return {'exito': False, 'error': 'Error guardando respuesta'}
-            
+
             # PASO 6: Esperar que se procese y se cierre el modal automáticamente
-            await asyncio.sleep(3)  # Reducido de 5 a 3 segundos
-            
-            self._log(f"✅ Glosa {id_glosa} procesada exitosamente")
-            
+            await asyncio.sleep(3)
+
+            # ÉXITO: Marcar como procesada
+            await self._guardar_glosa_procesada(glosa_info.get('idcuenta', ''), glosa_info, configuracion)
+            self._log(f"✅ Glosa {glosa_info.get('id_glosa', '')} guardada como procesada en ambas tablas")
             return {'exito': True, 'configuracion_usada': configuracion['tipo']}
-            
+
         except Exception as e:
             error_msg = f"Error procesando glosa individual {glosa_info.get('id_glosa', 'N/A')}: {e}"
             self._log(error_msg, "error")
-            
-            # Intentar cerrar modal en caso de error
             try:
                 await self._cerrar_modal()
             except:
                 pass
-            
+            await self._guardar_glosa_fallida(glosa_info.get('idcuenta', ''), glosa_info, error_msg)
             return {'exito': False, 'error': error_msg}
     
     async def _hacer_clic_boton_glosa(self, id_glosa: str) -> bool:
@@ -819,34 +824,44 @@ class ProcesadorCompletoGlosasImplementado:
             self._log(f"❌ Error buscando configuración: {e}", "error")
             return None
     
-    async def _llenar_modal_respuesta(self, configuracion: Dict) -> bool:
-        """
-        Llena los campos del modal con la información de configuración.
-        
-        Args:
-            configuracion (Dict): Configuración de respuesta
-            
-        Returns:
-            bool: True si se llenó correctamente
-        """
+    async def _llenar_modal_respuesta(self, configuracion: Dict, glosa_info: Dict) -> bool:
         try:
             self._log("📝 Llenando campos del modal")
-            
             # PASO 1: Seleccionar respuesta en dropdown Select2
             if not await self._seleccionar_respuesta_dropdown():
                 return False
-            
             # PASO 2: Llenar justificación
             if not await self._llenar_justificacion(configuracion['respuesta']):
                 return False
-            
+
             # PASO 3: Subir archivo PDF
-            if not await self._subir_archivo_pdf(configuracion['pdf_path']):
-                return False
-            
+            pdf_path = configuracion['pdf_path']
+            tipo = glosa_info.get('tipo', '')
+            num_factura = glosa_info.get('num_factura', '')
+            idcuenta = glosa_info.get('idcuenta', '')
+
+            # Si es AUTORIZACION y hay número de factura, ajusta la ruta y valida existencia
+            if tipo.upper() == "AUTORIZACION" and num_factura:
+                ruta_final = os.path.normpath(os.path.join(pdf_path, num_factura, "OTROS.PDF"))
+                self._log(f"Ruta PDF ajustada por AUTORIZACION: {ruta_final}")
+                if not os.path.exists(ruta_final):
+                    self._log(f"❌ PDF de AUTORIZACION no encontrado: {ruta_final}", "error")
+                    await self._guardar_glosa_fallida(idcuenta, glosa_info, "PDF de AUTORIZACION no encontrado")
+                    await self._marcar_cuenta_fallida(idcuenta, "PDF de AUTORIZACION no encontrado")
+                    return False
+            else:
+                ruta_final = os.path.normpath(pdf_path)
+                if pdf_path and not os.path.exists(ruta_final):
+                    self._log(f"⚠️ Archivo PDF no encontrado: {ruta_final}", "warning")
+                    # No es error crítico para otros tipos
+
+            # Solo sube el archivo si existe
+            if pdf_path and os.path.exists(ruta_final):
+                if not await self._subir_archivo_pdf(ruta_final):
+                    return False
+
             self._log("✅ Modal llenado correctamente")
             return True
-            
         except Exception as e:
             self._log(f"❌ Error llenando modal: {e}", "error")
             return False
@@ -1091,21 +1106,21 @@ class ProcesadorCompletoGlosasImplementado:
         except Exception as e:
             self._log(f"⚠️ Error haciendo scroll: {e}", "warning")
     
-    async def _extraer_glosas_de_tabla(self) -> List[Dict]:
+    async def _extraer_glosas_de_tabla(self, idcuenta: str) -> List[Dict]:
         """Extrae información de todas las glosas de la tabla."""
         try:
             glosas = []
             filas = self.page.locator(self.selectores['filas_glosas'])
             total_filas = await filas.count()
-            
+
             self._log(f"📊 Extrayendo {total_filas} glosas de la tabla")
-            
+
             for i in range(total_filas):
                 try:
                     fila = filas.nth(i)
                     celdas = fila.locator("td")
                     total_celdas = await celdas.count()
-                    
+
                     if total_celdas >= 8:  # Verificar columnas mínimas
                         glosa_info = {
                             'id_glosa': await celdas.nth(0).text_content() or "",
@@ -1116,26 +1131,28 @@ class ProcesadorCompletoGlosasImplementado:
                             'justificacion': await celdas.nth(5).text_content() or "",
                             'valor_glosado': await celdas.nth(6).text_content() or "",
                             'estado': await celdas.nth(7).text_content() or "",
-                            'indice': i
+                            'indice': i,
+                            'idcuenta': idcuenta  # Amarra el ítem a la cuenta principal
                         }
-                        
+
                         # Limpiar datos
                         for key, value in glosa_info.items():
                             if isinstance(value, str):
                                 glosa_info[key] = value.strip()
-                        
+                        cuenta_id = await self._obtener_cuenta_id(idcuenta)
+                        self._guardar_glosa_en_detalle(cuenta_id, glosa_info)
                         glosas.append(glosa_info)
-                        
+
                         if i < 5:  # Log de las primeras 5
                             self._log(f"   📋 Glosa {i+1}: {glosa_info['id_glosa']} - {glosa_info['tipo']} - {glosa_info['estado']}")
-                
+
                 except Exception as e:
                     self._log(f"⚠️ Error extrayendo glosa en fila {i}: {e}", "warning")
                     continue
-            
+                
             self._log(f"📊 Extracción completada: {len(glosas)} glosas")
             return glosas
-            
+
         except Exception as e:
             self._log(f"❌ Error extrayendo glosas de tabla: {e}", "error")
             return []
@@ -1317,59 +1334,48 @@ class ProcesadorCompletoGlosasImplementado:
             self._log(f"❌ Error marcando cuenta como fallida: {e}", "error")
     
     async def _guardar_glosa_procesada(self, idcuenta: str, glosa_info: Dict, configuracion: Dict):
+        print(f"🟢 [DEBUG] Llamando a _guardar_glosa_procesada para idcuenta={idcuenta}, id_glosa={glosa_info.get('id_glosa', '')}")
+    
         """Guarda una glosa como procesada en ambas tablas."""
         try:
             cuenta_id = await self._obtener_cuenta_id(idcuenta)
             if not cuenta_id:
                 return
-
             with self.db_manager.get_connection() as conn:
-                # 1. Insertar en glosas_detalles_procesadas
+                # Verifica si la fila existe antes del UPDATE
+                cursor = conn.execute(
+                    "SELECT id FROM glosa_items_detalle WHERE cuenta_principal_id = ? AND id_glosa = ?",
+                    (cuenta_id, glosa_info.get('id_glosa', ''))
+                )
+                existe = cursor.fetchone()
+                if not existe:
+                    self._log(f"❌ No existe la fila en glosa_items_detalle para cuenta_principal_id={cuenta_id}, id_glosa={glosa_info.get('id_glosa', '')}", "error")
+                # UPDATE
                 conn.execute("""
-                    INSERT INTO glosas_detalles_procesadas 
-                    (idcuenta, id_glosa, id_item, descripcion_item, tipo, 
-                     justificacion, valor_glosado, estado_original,
-                     respuesta_aplicada, config_id, estado_procesamiento, 
-                     fecha_procesamiento, error_mensaje)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
-                """, (
-                    idcuenta,
-                    glosa_info['id_glosa'],
-                    glosa_info.get('id_item', ''),
-                    glosa_info.get('descripcion_item', ''),
-                    glosa_info.get('tipo', ''),
-                    glosa_info.get('justificacion', ''),
-                    self._parsear_moneda(glosa_info.get('valor_glosado', '0')),
-                    glosa_info.get('estado', ''),
-                    configuracion['respuesta'],
-                    None,  # config_id si lo tienes
-                    'PROCESADO',
-                    None  # sin error
-                ))
-
-                # 2. Actualizar glosa_items_detalle
-                conn.execute("""
-                    UPDATE glosa_items_detalle 
+                    UPDATE glosa_items_detalle
                     SET fue_procesado = TRUE,
                         fecha_procesamiento = CURRENT_TIMESTAMP,
                         respuesta_enviada = ?,
-                        archivo_subido = ?
+                        archivo_subido = ?,
+                        error_procesamiento = ''
                     WHERE cuenta_principal_id = ? AND id_glosa = ?
                 """, (
-                    configuracion['respuesta'],
+                    configuracion.get('respuesta', ''),
                     configuracion.get('pdf_path', ''),
                     cuenta_id,
-                    glosa_info['id_glosa']
+                    glosa_info.get('id_glosa', '')
                 ))
-
+                self._log(f"Filas actualizadas: {conn.total_changes}")
                 conn.commit()
-                self._log(f"✅ Glosa {glosa_info['id_glosa']} guardada como procesada en ambas tablas")
+            self._log(f"✅ Glosa {glosa_info.get('id_glosa', '')} guardada como procesada en ambas tablas")
 
         except Exception as e:
             self._log(f"⚠️ Error guardando glosa procesada: {e}", "warning")
     
     async def _guardar_glosa_fallida(self, idcuenta: str, glosa_info: Dict, error: str):
         """Guarda una glosa como fallida en ambas tablas."""
+        print(f"🔴 [DEBUG] Llamando a _guardar_glosa_fallida para idcuenta={idcuenta}, id_glosa={glosa_info.get('id_glosa', '')}, error={error}")
+   
         try:
             cuenta_id = await self._obtener_cuenta_id(idcuenta)
             if not cuenta_id:
@@ -1546,7 +1552,7 @@ class ProcesadorCompletoGlosasImplementado:
             if not await self._hacer_scroll_hasta_tabla_glosas():
                 return {'exito': False, 'error': 'No se pudo hacer scroll hasta tabla de glosas'}
     
-            glosas_extraidas = await self._extraer_glosas_de_tabla()
+            glosas_extraidas = await self._extraer_glosas_de_tabla(idcuenta)
     
             if not glosas_extraidas:
                 return {'exito': False, 'error': 'No se encontraron glosas para procesar'}
