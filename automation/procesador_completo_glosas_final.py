@@ -126,6 +126,11 @@ class ProcesadorCompletoGlosasImplementado:
             cuentas_fallidas = 0
     
             for i, cuenta_data in enumerate(cuentas_pendientes):
+                # Revisa si el usuario pulsó "Detener"
+                if self.worker and hasattr(self.worker, "_should_stop") and self.worker._should_stop:
+                    self._log("🛑 Proceso detenido por el usuario.", "warning")
+                    break
+                
                 idcuenta = cuenta_data['idcuenta']
                 self._log("")
                 self._log(f"🎯 PROCESANDO CUENTA {i + 1}/{len(cuentas_pendientes)}: {idcuenta}")
@@ -138,9 +143,8 @@ class ProcesadorCompletoGlosasImplementado:
                         self.estadisticas['cuentas_procesadas'] += 1
                         self.estadisticas['glosas_procesadas'] += resultado.get('glosas_procesadas', 0)
                         self._log(f"✅ CUENTA {idcuenta} COMPLETADA")
-                        self._log(f" • Glosas procesadas: {resultado.get('glosas_procesadas', 0)}")
+                        self._log(f"   • Glosas procesadas: {resultado.get('glosas_procesadas', 0)}")
                     else:
-                        # ✅ MEJORADO: Asegurar que se marque como FALLIDO si no fue exitoso
                         error_msg = resultado.get('error', 'Error desconocido en procesamiento')
                         estado_actual = self.db_manager.get_cuenta_estado(idcuenta)
                         if estado_actual != EstadoCuenta.FALLIDO:
@@ -151,14 +155,20 @@ class ProcesadorCompletoGlosasImplementado:
                 except Exception as e:
                     error_msg = f"Error general procesando cuenta {idcuenta}: {e}"
                     self._log(error_msg, "error")
-                    await self._marcar_cuenta_fallida(idcuenta, error_msg)
-                    await self._regresar_tabla_principal()
-                    cuentas_fallidas += 1
-                    self.estadisticas['cuentas_fallidas'] += 1
                     # SOLO DETÉN EL PROCESO SI EL NAVEGADOR SE CERRÓ
                     if "Target page, context or browser has been closed" in str(e):
                         self._log("🚨 Navegador/contexto cerrado. Deteniendo procesamiento de cuentas.", "error")
+                        if self.worker and hasattr(self.worker, "stop"):
+                            self.worker.stop()
                         break
+                    # Si no es cierre de navegador, sigue con el manejo normal
+                    await self._marcar_cuenta_fallida(idcuenta, error_msg)
+                    try:
+                        await self._regresar_tabla_principal()
+                    except Exception as e2:
+                        self._log(f"❌ Error regresando a tabla principal: {e2}", "error")
+                    cuentas_fallidas += 1
+                    self.estadisticas['cuentas_fallidas'] += 1
                 await asyncio.sleep(3)
     
                 # Log de progreso
