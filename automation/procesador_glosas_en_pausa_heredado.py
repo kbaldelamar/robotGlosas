@@ -1,342 +1,354 @@
-# automation/procesador_glosas_en_pausa_heredado.py
 import asyncio
 import logging
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from playwright.async_api import Page
-from automation.procesador_completo_glosas_final import ProcesadorCompletoGlosasImplementado
-from automation.navigation_handler import AutomationState, NavigationHandler
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
+from automation.navigation_handler import AutomationState
 
-class ProcesadorGlosasEnPausaHeredado(ProcesadorCompletoGlosasImplementado):
-    """
-    Procesador específico para "En Pausa" que hereda toda la lógica de procesamiento
-    del ProcesadorCompletoGlosasImplementado pero adapta la navegación.
-    
-    ✅ VENTAJAS:
-    - Reutiliza TODA la lógica de procesamiento existente
-    - No daña el código que funciona
-    - Solo modifica la navegación específica
-    - Mantiene compatibilidad completa
-    
-    ✅ SOBRESCRIBE SOLO:
-    - URL base (mantiene "En Pausa" en lugar de "Bolsa Respuesta")
-    - Método de regreso a tabla principal
-    - Preparación del sistema (para "En Pausa")
-    """
-    
+class ProcesadorGlosasEnPausaIndependiente:
     def __init__(self, page: Page, automation_state: AutomationState, worker_thread=None):
-        """
-        Inicializa el procesador heredado específico para EN PAUSA.
-        
-        Args:
-            page (Page): Página de Playwright
-            automation_state (AutomationState): Estado compartido de automatización
-            worker_thread: Thread con signals para actualización en tiempo real
-        """
-        # Llamar al constructor padre (hereda TODA la funcionalidad)
-        super().__init__(page, automation_state, worker_thread)
-        
-        # Cambiar identificador de clase para logs
-        self.state.update(
-            class_name="ProcesadorGlosasEnPausaHeredado",
-            method_name="__init__"
-        )
-        
-        # ✅ ESPECÍFICO PARA EN PAUSA: URL base diferente
-        self.url_tabla_en_pausa = None  # Se establecerá dinámicamente
-        
-        # ✅ ESPECÍFICO PARA EN PAUSA: Estadísticas adicionales
-        self.estadisticas_en_pausa = {
-            'cuentas_recuperadas': 0,
-            'intentos_previos_promedio': 0,
-            'cuentas_definitivamente_fallidas': 0
+        self.page = page
+        self.state = automation_state
+        self.logger = logging.getLogger(__name__)
+        self.db_manager = DatabaseManagerGlosas()
+        self.worker = worker_thread
+
+        self.selectores = {
+            'filas_tabla_principal': "#tablaRespuestaGlosaPause tbody tr",
+            'boton_cuenta': ".btRespuestaStart",
+            'tabla_glosas': "#tableAuditGlosas",
+            'filas_glosas': "#tableAuditGlosas tbody tr",
+            'boton_glosa_individual': ".btnAnswerGlosaModal",
+            'modal_titulo': "#titleModalAnswerGlosa",
+            'form_modal': "#formAnswerGlosa",
+            'select2_container': "#select2-glosaRespTipo-container",
+            'textarea_justificacion': "#glosaRespObs",
+            'input_archivo': "#glosaRespFile",
+            'boton_responder': "#btnAnswerGlosa",
+            'boton_terminar': "#btRespuestaFinish",
+            'boton_confirmar_terminar': ".swal2-confirm"
         }
-        
-        self._log("🔄 ProcesadorGlosasEnPausaHeredado inicializado - HEREDA funcionalidad completa")
-        self._log("✅ Lógica de procesamiento: REUTILIZADA del padre")
-        self._log("🔄 Navegación: ADAPTADA para En Pausa")
-    
-    # ========================================================================
-    # ✅ MÉTODOS SOBRESCRITOS (SOLO LOS DE NAVEGACIÓN)
-    # ========================================================================
-    
-    async def _preparar_sistema(self) -> bool:
-        """
-        ✅ SOBRESCRITO: Prepara el sistema pero mantiene URL de "En Pausa".
-        """
-        try:
-            self._log("🔧 Preparando sistema para EN PAUSA (versión heredada)")
-            
-            # ✅ DIFERENCIA: Guardar URL de EN PAUSA en lugar de Bolsa Respuesta
-            self.url_tabla_en_pausa = self.page.url
-            self.url_tabla_principal = self.url_tabla_en_pausa  # Para compatibilidad con métodos padre
-            
-            self._log(f"💾 URL EN PAUSA guardada: {self.url_tabla_en_pausa}")
-            
-            # ✅ REUTILIZAR: Resto de la lógica del padre
-            await self._cargar_configuraciones_respuesta()
-            await self._configurar_tabla_100_registros()
-            
-            self._log("✅ Sistema preparado para EN PAUSA (funcionalidad heredada)")
-            return True
-            
-        except Exception as e:
-            self._log(f"❌ Error preparando sistema EN PAUSA: {e}", "error")
-            return False
-    
-    async def _regresar_tabla_principal(self):
-        """
-        ✅ SOBRESCRITO: Regresa a "En Pausa" en lugar de "Bolsa Respuesta".
-        """
-        try:
-            self._log("↩️ Regresando a tabla EN PAUSA (no a Bolsa Respuesta)")
-            
-            if self.url_tabla_en_pausa:
-                await self.page.goto(self.url_tabla_en_pausa)
-                await self.page.wait_for_load_state('networkidle', timeout=15000)
-                await asyncio.sleep(3)
-                self._log("✅ Regresado a tabla EN PAUSA exitosamente")
-            else:
-                # ✅ FALLBACK: Navegar específicamente a En Pausa
-                self._log("🔄 URL EN PAUSA no guardada, navegando con NavigationHandler...")
-                await self.navigation_handler.navigate_to_respuesta_glosas()
-                await self.navigation_handler.navigate_to_en_pausa()
-                self._log("✅ Navegación a EN PAUSA completada como fallback")
-            
-        except Exception as e:
-            self._log(f"❌ Error regresando a tabla EN PAUSA: {e}", "error")
-    
-    async def _asegurar_tabla_principal(self) -> bool:
-        """
-        ✅ SOBRESCRITO: Se asegura de estar en tabla EN PAUSA.
-        """
-        try:
-            url_actual = self.page.url
-            
-            # ✅ VERIFICAR: Si estamos en una URL de procesamiento, regresar a EN PAUSA
-            if "respuestaGlosastart" in url_actual and self.url_tabla_en_pausa:
-                if url_actual != self.url_tabla_en_pausa:
-                    self._log("🔄 No estamos en tabla EN PAUSA, regresando...")
-                    await self._regresar_tabla_principal()
-                    return True
-            
-            return True
-            
-        except Exception as e:
-            self._log(f"❌ Error asegurando tabla EN PAUSA: {e}", "error")
-            return False
-    
-    # ========================================================================
-    # ✅ MÉTODOS ESPECÍFICOS PARA EN PAUSA (NUEVOS)
-    # ========================================================================
-    
-    async def procesar_cuentas_en_pausa_especificas(self, cuentas_en_pausa: List[Dict]) -> Tuple[int, int]:
-        """
-        ✅ MÉTODO PRINCIPAL ESPECÍFICO: Procesa cuentas EN PAUSA con lógica adaptada.
-        
-        Args:
-            cuentas_en_pausa (List[Dict]): Lista de cuentas para reprocesar
-            
-        Returns:
-            Tuple[int, int]: (cuentas_recuperadas, cuentas_fallidas)
-        """
-        try:
-            self.state.update(
-                method_name="procesar_cuentas_en_pausa_especificas",
-                action="Procesando cuentas EN PAUSA con herencia"
-            )
-            
-            self._log("🔄 === INICIANDO PROCESAMIENTO EN PAUSA HEREDADO ===")
-            self._log(f"📊 Cuentas a reprocesar: {len(cuentas_en_pausa)}")
-            self._log("✅ Funcionalidad heredada: Procesamiento completo de glosas")
-            self._log("🔄 Funcionalidad adaptada: Navegación específica EN PAUSA")
-            self._log("="*80)
-            
-            # ✅ REUTILIZAR: Preparación del sistema (pero adaptada)
-            if not await self._preparar_sistema():
-                return 0, 0
-            
-            cuentas_recuperadas = 0
-            cuentas_fallidas = 0
-            
-            for i, cuenta_data in enumerate(cuentas_en_pausa):
-                idcuenta = cuenta_data['idcuenta']
-                intentos_actuales = cuenta_data.get('intentos', 0)
-                
-                self._log("")
-                self._log(f"🎯 REPROCESANDO EN PAUSA {i + 1}/{len(cuentas_en_pausa)}: {idcuenta}")
-                self._log(f"   Intentos anteriores: {intentos_actuales}")
-                self._log(f"   Estado actual: {cuenta_data.get('estado', 'N/A')}")
-                
-                try:
-                    # ✅ ESPECÍFICO EN PAUSA: Incrementar intentos
-                    await self._incrementar_intentos_en_pausa(idcuenta)
-                    
-                    # ✅ REUTILIZAR: Lógica completa del padre
-                    resultado = await self._procesar_cuenta_completa(idcuenta)
-                    
-                    if resultado['exito']:
-                        cuentas_recuperadas += 1
-                        self.estadisticas_en_pausa['cuentas_recuperadas'] += 1
-                        
-                        self._log(f"✅ CUENTA {idcuenta} RECUPERADA EN PAUSA")
-                        self._log(f"   • Glosas procesadas: {resultado.get('glosas_procesadas', 0)}")
-                        
-                        # Emitir signal de recuperación
-                        if self.worker:
-                            self.worker.emit_cuenta_processed(idcuenta, 'COMPLETADO')
-                    else:
-                        cuentas_fallidas += 1
-                        
-                        # ✅ ESPECÍFICO EN PAUSA: Verificar límite de intentos
-                        nuevo_intentos = intentos_actuales + 1
-                        if nuevo_intentos >= 5:
-                            await self._marcar_como_fallida_definitiva_en_pausa(idcuenta, resultado.get('error', ''))
-                            self.estadisticas_en_pausa['cuentas_definitivamente_fallidas'] += 1
-                            self._log(f"🚫 CUENTA {idcuenta} FALLÓ DEFINITIVAMENTE (5+ intentos)")
-                            
-                            if self.worker:
-                                self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO_DEFINITIVO')
-                        else:
-                            self._log(f"❌ CUENTA {idcuenta} FALLÓ (intento {nuevo_intentos}/5)")
-                            
-                            if self.worker:
-                                self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
-                
-                except Exception as e:
-                    cuentas_fallidas += 1
-                    error_msg = f"Error procesando cuenta EN PAUSA {idcuenta}: {e}"
-                    self._log(error_msg, "error")
-                    
-                    await self._marcar_error_procesamiento_en_pausa(idcuenta, str(e))
-                    
-                    if self.worker:
-                        self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
-                
-                # Pausa entre cuentas
-                await asyncio.sleep(3)
-                
-                # Log de progreso
-                if (i + 1) % 3 == 0:
-                    porcentaje = ((i + 1) / len(cuentas_en_pausa)) * 100
-                    self._log(f"📊 PROGRESO EN PAUSA: {i + 1}/{len(cuentas_en_pausa)} ({porcentaje:.1f}%)")
-                    self._log(f"   • ✅ Recuperadas: {cuentas_recuperadas}")
-                    self._log(f"   • ❌ Fallidas: {cuentas_fallidas}")
-            
-            # ✅ MOSTRAR ESTADÍSTICAS ESPECÍFICAS
-            await self._mostrar_estadisticas_en_pausa(cuentas_recuperadas, cuentas_fallidas, len(cuentas_en_pausa))
-            
-            self._log("="*80)
-            self._log("🎉 PROCESAMIENTO EN PAUSA HEREDADO COMPLETADO")
-            
-            return cuentas_recuperadas, cuentas_fallidas
-            
-        except Exception as e:
-            self._log(f"❌ Error crítico en procesamiento EN PAUSA heredado: {e}", "error")
-            return 0, 0
-    
-    # ========================================================================
-    # ✅ MÉTODOS AUXILIARES ESPECÍFICOS PARA EN PAUSA
-    # ========================================================================
-    
-    async def _incrementar_intentos_en_pausa(self, idcuenta: str):
-        """Incrementa el número de intentos para una cuenta EN PAUSA."""
+        self.configuraciones_respuesta = {}
+        self.url_tabla_en_pausa = None
+
+    def _log(self, mensaje: str, nivel: str = "info"):
+        if nivel == "info":
+            self.logger.info(mensaje)
+        elif nivel == "warning":
+            self.logger.warning(mensaje)
+        elif nivel == "error":
+            self.logger.error(mensaje)
+
+    async def preparar_sistema(self):
+        self.url_tabla_en_pausa = self.page.url
+        await self.cargar_configuraciones_respuesta()
+        await self.configurar_tabla_100_registros()
+
+    async def cargar_configuraciones_respuesta(self):
         try:
             with self.db_manager.get_connection() as conn:
-                conn.execute("""
-                    UPDATE cuenta_glosas_principal 
-                    SET intentos = COALESCE(intentos, 0) + 1,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE idcuenta = ?
-                """, (idcuenta,))
-                conn.commit()
-                
-                self._log(f"🔢 Intentos incrementados para cuenta EN PAUSA {idcuenta}")
-                
+                cursor = conn.execute("""
+                    SELECT tipo, justificacion_patron, respuesta_automatica, url_pdf
+                    FROM glosas_respuestas_config 
+                    WHERE activo = 1
+                    ORDER BY tipo, justificacion_patron
+                """)
+                self.configuraciones_respuesta = {}
+                for row in cursor.fetchall():
+                    key = f"{row['tipo']}_{row['justificacion_patron']}"
+                    self.configuraciones_respuesta[key] = {
+                        'respuesta': row['respuesta_automatica'],
+                        'pdf_path': row['url_pdf'],
+                        'tipo': row['tipo'],
+                        'patron': row['justificacion_patron']
+                    }
         except Exception as e:
-            self._log(f"❌ Error incrementando intentos EN PAUSA {idcuenta}: {e}", "error")
-    
-    async def _marcar_como_fallida_definitiva_en_pausa(self, idcuenta: str, motivo: str):
-        """Marca una cuenta como fallida definitiva EN PAUSA (5+ intentos)."""
-        try:
-            self.db_manager.update_cuenta_estado(
-                idcuenta, 
-                EstadoCuenta.FALLIDO,
-                f"FALLIDA DEFINITIVA EN PAUSA después de 5 intentos: {motivo[:200]}"
-            )
-            
-            self._log(f"🚫 Cuenta EN PAUSA {idcuenta} marcada como fallida definitiva")
-            
-        except Exception as e:
-            self._log(f"❌ Error marcando como fallida definitiva EN PAUSA {idcuenta}: {e}", "error")
-    
-    async def _marcar_error_procesamiento_en_pausa(self, idcuenta: str, error: str):
-        """Marca error de procesamiento EN PAUSA."""
-        try:
-            self.db_manager.update_cuenta_estado(
-                idcuenta, 
-                EstadoCuenta.FALLIDO,
-                f"Error EN PAUSA: {error[:200]}"
-            )
-            
-        except Exception as e:
-            self._log(f"❌ Error marcando error EN PAUSA {idcuenta}: {e}", "error")
-    
-    async def _mostrar_estadisticas_en_pausa(self, recuperadas: int, fallidas: int, total: int):
-        """Muestra estadísticas específicas del reprocesamiento EN PAUSA."""
-        try:
-            tiempo_total = asyncio.get_event_loop().time() - self.estadisticas['tiempo_inicio']
-            
-            self._log("")
-            self._log("📊 ESTADÍSTICAS ESPECÍFICAS DE REPROCESAMIENTO EN PAUSA")
-            self._log("="*80)
-            self._log(f"⏱️  TIEMPO TOTAL EN PAUSA: {tiempo_total:.2f} segundos")
-            self._log(f"🔄 CUENTAS REPROCESADAS: {total}")
-            self._log(f"✅ CUENTAS RECUPERADAS: {recuperadas}")
-            self._log(f"❌ CUENTAS AÚN FALLIDAS: {fallidas}")
-            self._log(f"🚫 FALLIDAS DEFINITIVAS: {self.estadisticas_en_pausa['cuentas_definitivamente_fallidas']}")
-            
-            if total > 0:
-                tasa_recuperacion = (recuperadas / total) * 100
-                self._log(f"📈 TASA DE RECUPERACIÓN EN PAUSA: {tasa_recuperacion:.1f}%")
-                
-                if recuperadas > 0:
-                    tiempo_promedio = tiempo_total / recuperadas
-                    self._log(f"⚡ TIEMPO PROMEDIO POR RECUPERACIÓN: {tiempo_promedio:.2f}s")
-            
-            self._log("")
-            self._log("🎯 FUNCIONALIDADES HEREDADAS UTILIZADAS:")
-            self._log("   ✅ Lógica completa de procesamiento de glosas")
-            self._log("   ✅ Manejo de modales y respuestas automáticas")
-            self._log("   ✅ Base de datos y estados")
-            self._log("   ✅ Sistema de configuraciones")
-            self._log("   🔄 Navegación adaptada para EN PAUSA")
-            self._log("="*80)
-            
-        except Exception as e:
-            self._log(f"❌ Error mostrando estadísticas EN PAUSA: {e}", "error")
+            self._log(f"Error cargando configuraciones: {e}", "error")
+            self.configuraciones_respuesta = {}
 
-    # ========================================================================
-    # ✅ TODOS LOS DEMÁS MÉTODOS SE HEREDAN AUTOMÁTICAMENTE
-    # ========================================================================
-    # 
-    # Los siguientes métodos se heredan del padre sin cambios:
-    # - _procesar_cuenta_completa()
-    # - _procesar_todas_las_glosas_cuenta()
-    # - _procesar_glosa_individual()
-    # - _hacer_clic_boton_glosa()
-    # - _esperar_modal_abierto()
-    # - _buscar_configuracion_glosa()
-    # - _llenar_modal_respuesta()
-    # - _seleccionar_respuesta_dropdown()
-    # - _llenar_justificacion()
-    # - _subir_archivo_pdf()
-    # - _guardar_respuesta_modal()
-    # - _terminar_cuenta()
-    # - _confirmar_terminar()
-    # - _extraer_glosas_de_tabla()
-    # - _parsear_moneda()
-    # - Y TODOS los demás métodos de procesamiento
-    #
-    # ✅ RESULTADO: Funcionalidad completa con navegación adaptada
+    async def configurar_tabla_100_registros(self):
+        try:
+            await self.page.evaluate("""
+                () => {
+                    const select = document.querySelector('select[name="tablaRespuestaGlosaPause_length"]');
+                    if (select) {
+                        select.value = '100';
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+                    return false;
+                }
+            """)
+            await self.page.wait_for_load_state('networkidle', timeout=10000)
+            await asyncio.sleep(2)
+        except Exception as e:
+            self._log(f"Error configurando tabla: {e}", "warning")
+
+    async def procesar_cuentas_en_pausa(self, cuentas_en_pausa: List[Dict]) -> Tuple[int, int]:
+        await self.preparar_sistema()
+        procesadas = 0
+        fallidas = 0
+        for i, cuenta_data in enumerate(cuentas_en_pausa):
+            idcuenta = cuenta_data['idcuenta']
+            self._log(f"🔄 PROCESANDO {i + 1}/{len(cuentas_en_pausa)}: {idcuenta}")
+            try:
+                if await self.hacer_clic_cuenta_en_pausa(idcuenta):
+                    self._log(f"[TRACE] Llamando a procesar_glosas_cuenta para {idcuenta}")
+                    resultado = await self.procesar_glosas_cuenta(idcuenta)
+                    self._log(f"[TRACE] Resultado de procesar_glosas_cuenta: {resultado}")
+                    if resultado['exito']:
+                        procesadas += 1
+                        self._log(f"✅ CUENTA {idcuenta} PROCESADA EN PAUSA")
+                        await self.terminar_cuenta()
+                    else:
+                        fallidas += 1
+                        self._log(f"❌ CUENTA {idcuenta} FALLIDA EN PAUSA: {resultado.get('error', '')}")
+                else:
+                    fallidas += 1
+                    self._log(f"❌ CUENTA {idcuenta} NO ENCONTRADA EN PAUSA")
+            except Exception as e:
+                fallidas += 1
+                self._log(f"❌ Error procesando cuenta {idcuenta} EN PAUSA: {e}", "error")
+            await asyncio.sleep(2)
+        self._log(f"🎉 PROCESAMIENTO EN PAUSA COMPLETADO: {procesadas} procesadas, {fallidas} fallidas")
+        return procesadas, fallidas
+
+    async def hacer_clic_cuenta_en_pausa(self, idcuenta: str) -> bool:
+        try:
+            filas = self.page.locator(self.selectores['filas_tabla_principal'])
+            total_filas = await filas.count()
+            for i in range(total_filas):
+                fila = filas.nth(i)
+                celdas = fila.locator("td")
+                if await celdas.count() > 0:
+                    id_celda = await celdas.nth(0).text_content()
+                    if id_celda and id_celda.strip() == idcuenta:
+                        boton_cuenta = fila.locator(self.selectores['boton_cuenta'])
+                        if await boton_cuenta.count() > 0:
+                            await boton_cuenta.first.scroll_into_view_if_needed()
+                            await asyncio.sleep(1)
+                            await boton_cuenta.first.click()
+                            await self.page.wait_for_load_state('networkidle', timeout=15000)
+                            await asyncio.sleep(3)
+                            return True
+            return False
+        except Exception as e:
+            self._log(f"Error haciendo clic en cuenta EN PAUSA: {e}", "error")
+            return False
+
+    async def procesar_glosas_cuenta(self, idcuenta: str) -> Dict:
+        try:
+            self._log(f"[TRACE] Esperando 6 segundos antes de hacer scroll a la tabla hija de glosas...")
+            await asyncio.sleep(6)
+            self._log(f"[TRACE] Llamando a hacer_scroll_hasta_tabla_glosas para cuenta {idcuenta}")
+            await self.hacer_scroll_hasta_tabla_glosas()
+            self._log(f"[TRACE] Llamando a extraer_glosas_de_tabla para cuenta {idcuenta}")
+            glosas = await self.extraer_glosas_de_tabla(idcuenta)
+            self._log(f"[TRACE] Resultado de extraer_glosas_de_tabla: {len(glosas)} glosas extraidas para cuenta {idcuenta}")
+            if not glosas:
+                self._log(f"[TRACE] No se encontraron glosas para procesar en cuenta {idcuenta}")
+                return {'exito': False, 'error': 'No se encontraron glosas para procesar'}
+            glosas_procesadas = 0
+            glosas_fallidas = 0
+            for glosa in glosas:
+                resultado = await self.procesar_glosa_individual(glosa)
+                if resultado['exito']:
+                    glosas_procesadas += 1
+                else:
+                    glosas_fallidas += 1
+            self._log(f"[TRACE] Fin de procesar_glosas_cuenta para {idcuenta}: {glosas_procesadas} procesadas, {glosas_fallidas} fallidas")
+            return {
+                'exito': glosas_procesadas > 0,
+                'glosas_procesadas': glosas_procesadas,
+                'glosas_fallidas': glosas_fallidas
+            }
+        except Exception as e:
+            self._log(f"[TRACE] Excepción en procesar_glosas_cuenta para {idcuenta}: {e}", "error")
+            return {'exito': False, 'error': str(e)}
+
+    async def hacer_scroll_hasta_tabla_glosas(self) -> bool:
+        try:
+            self._log(f"[TRACE] INICIO hacer_scroll_hasta_tabla_glosas")
+            tabla_glosas = self.page.locator(self.selectores['tabla_glosas'])
+            if await tabla_glosas.count() > 0:
+                await tabla_glosas.scroll_into_view_if_needed()
+                await asyncio.sleep(2)
+                self._log(f"[TRACE] Scroll hasta tabla de glosas realizado")
+                return True
+            else:
+                self._log(f"[TRACE] Tabla de glosas no encontrada, haciendo scroll general")
+                await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.7)")
+                await asyncio.sleep(3)
+                return True
+        except Exception as e:
+            self._log(f"[TRACE] Error haciendo scroll: {e}", "warning")
+            return False
+
+    async def extraer_glosas_de_tabla(self, idcuenta: str) -> List[Dict]:
+        try:
+            self._log(f"[TRACE] INICIO extraer_glosas_de_tabla para cuenta {idcuenta}")
+            glosas = []
+            filas = self.page.locator(self.selectores['filas_glosas'])
+            total_filas = await filas.count()
+            self._log(f"[TRACE] Filas encontradas en tabla hija: {total_filas}")
+            for i in range(total_filas):
+                fila = filas.nth(i)
+                celdas = fila.locator("td")
+                if await celdas.count() >= 8:
+                    glosa_info = {
+                        'id_glosa': await celdas.nth(0).text_content() or "",
+                        'id_item': await celdas.nth(1).text_content() or "",
+                        'descripcion_item': await celdas.nth(2).text_content() or "",
+                        'tipo': await celdas.nth(3).text_content() or "",
+                        'descripcion': await celdas.nth(4).text_content() or "",
+                        'justificacion': await celdas.nth(5).text_content() or "",
+                        'valor_glosado': await celdas.nth(6).text_content() or "",
+                        'estado': await celdas.nth(7).text_content() or "",
+                        'idcuenta': idcuenta
+                    }
+                    glosas.append(glosa_info)
+            self._log(f"[TRACE] Fin extraer_glosas_de_tabla para cuenta {idcuenta}: {len(glosas)} glosas extraidas")
+            return glosas
+        except Exception as e:
+            self._log(f"[TRACE] Error extrayendo glosas: {e}", "error")
+            return []
+
+    async def procesar_glosa_individual(self, glosa_info: Dict) -> Dict:
+        try:
+            id_glosa = glosa_info.get('id_glosa', '')
+            tipo = glosa_info.get('tipo', '')
+            justificacion = glosa_info.get('justificacion', '')
+            if not await self.hacer_clic_boton_glosa(id_glosa):
+                return {'exito': False, 'error': 'No se pudo hacer clic en botón de glosa'}
+            if not await self.esperar_modal_abierto(id_glosa):
+                return {'exito': False, 'error': 'Modal no se abrió correctamente'}
+            configuracion = self.buscar_configuracion_glosa(tipo, justificacion)
+            if not configuracion:
+                await self.cerrar_modal()
+                return {'exito': False, 'error': 'Sin configuración disponible'}
+            if not await self.llenar_modal_respuesta(configuracion, glosa_info):
+                await self.cerrar_modal()
+                return {'exito': False, 'error': 'Error llenando campos del modal'}
+            if not await self.guardar_respuesta_modal():
+                await self.cerrar_modal()
+                return {'exito': False, 'error': 'Error guardando respuesta'}
+            await asyncio.sleep(3)
+            return {'exito': True}
+        except Exception as e:
+            await self.cerrar_modal()
+            return {'exito': False, 'error': str(e)}
+
+    async def hacer_clic_boton_glosa(self, id_glosa: str) -> bool:
+        try:
+            boton_glosa = self.page.locator(f'button.btnAnswerGlosaModal[idglosa="{id_glosa}"]')
+            if await boton_glosa.count() == 0:
+                return False
+            await boton_glosa.scroll_into_view_if_needed()
+            await asyncio.sleep(1)
+            await boton_glosa.click()
+            return True
+        except Exception:
+            return False
+
+    async def esperar_modal_abierto(self, id_glosa: str) -> bool:
+        try:
+            titulo_modal = self.page.locator(self.selectores['modal_titulo'])
+            await titulo_modal.wait_for(state="visible", timeout=10000)
+            await asyncio.sleep(2)
+            titulo_texto = await titulo_modal.text_content()
+            return id_glosa in titulo_texto
+        except Exception:
+            return False
+
+    def buscar_configuracion_glosa(self, tipo: str, justificacion: str) -> Optional[Dict]:
+        for key, config in self.configuraciones_respuesta.items():
+            if config['tipo'].upper() == tipo.upper():
+                patron = config['patron'].replace('%', '').upper()
+                if patron in justificacion.upper():
+                    return config
+        return None
+
+    async def llenar_modal_respuesta(self, configuracion: Dict, glosa_info: Dict) -> bool:
+        try:
+            select2_container = self.page.locator(self.selectores['select2_container'])
+            await select2_container.click()
+            await asyncio.sleep(2)
+            opcion = self.page.locator("li.select2-results__option:has-text('999 SUBSANADA')")
+            if await opcion.count() > 0:
+                await opcion.first.click()
+                await asyncio.sleep(1)
+            textarea = self.page.locator(self.selectores['textarea_justificacion'])
+            await textarea.scroll_into_view_if_needed()
+            await textarea.click()
+            await asyncio.sleep(0.5)
+            await textarea.press('Control+a')
+            await textarea.press('Delete')
+            await asyncio.sleep(0.5)
+            texto = configuracion['respuesta'].upper()
+            await self.page.evaluate("""
+                (texto) => {
+                    const textarea = document.getElementById('glosaRespObs');
+                    if (textarea) {
+                        textarea.value = texto;
+                        textarea.focus();
+                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+            """, texto)
+            await asyncio.sleep(0.3)
+            await textarea.press('Tab')
+            await asyncio.sleep(1)
+            pdf_path = configuracion['pdf_path']
+            if pdf_path:
+                input_file = self.page.locator(self.selectores['input_archivo'])
+                await input_file.set_input_files(pdf_path)
+                await asyncio.sleep(2)
+            return True
+        except Exception as e:
+            self._log(f"Error llenando modal: {e}", "error")
+            return False
+
+    async def guardar_respuesta_modal(self) -> bool:
+        try:
+            boton_responder = self.page.locator(self.selectores['boton_responder'])
+            await boton_responder.scroll_into_view_if_needed()
+            await boton_responder.click()
+            return True
+        except Exception:
+            return False
+
+    async def cerrar_modal(self):
+        try:
+            boton_x = self.page.locator('.close[data-dismiss=\"modal\"]')
+            if await boton_x.count() > 0:
+                await boton_x.first.click(timeout=3000)
+                await asyncio.sleep(1)
+                return True
+            await self.page.keyboard.press('Escape', timeout=2000)
+            await asyncio.sleep(1)
+            return True
+        except Exception:
+            return False
+
+    async def terminar_cuenta(self) -> bool:
+        try:
+            await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await asyncio.sleep(2)
+            boton_terminar = self.page.locator(self.selectores['boton_terminar']).filter(has_not=self.page.locator('[disabled]'))
+            if await boton_terminar.count() == 0:
+                return False
+            await boton_terminar.scroll_into_view_if_needed()
+            await boton_terminar.click()
+            await asyncio.sleep(3)
+            boton_confirmar = self.page.locator(self.selectores['boton_confirmar_terminar'])
+            await boton_confirmar.wait_for(state="visible", timeout=10000)
+            await boton_confirmar.click()
+            await asyncio.sleep(2)
+            await self.page.wait_for_load_state('networkidle', timeout=15000)
+            await asyncio.sleep(5)
+            return True
+        except Exception as e:
+            self._log(f"Error terminando cuenta: {e}", "error")
+            return False

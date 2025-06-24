@@ -11,8 +11,10 @@ from playwright.async_api import Page
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
 from automation.navigation_handler import AutomationState
+from automation.procesador_completo_glosas_final import ProcesadorCompletoGlosasImplementado
 
-class ProcesadorEnPausaEspecifico:
+
+class ProcesadorEnPausaEspecifico(ProcesadorCompletoGlosasImplementado):
     """
     Procesador específico para módulo EN PAUSA.
     NO navega a Bolsa Respuesta - se mantiene en En Pausa.
@@ -77,6 +79,7 @@ class ProcesadorEnPausaEspecifico:
             # Se asume que la tabla ya está lista y visible gracias a NavigationHandler
 
             # PASO 3: Procesar cada cuenta
+            await self._preparar_sistema()
             procesadas = 0
             fallidas = 0
             
