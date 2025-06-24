@@ -160,7 +160,10 @@ class WebScraperGlosasEnPausa:
             return False
     
     async def _etapa2_navegacion_en_pausa(self) -> bool:
-        """ETAPA 2: Navega específicamente a EN PAUSA."""
+        """
+        ETAPA 2: Navega específicamente a EN PAUSA.
+        ✅ CORREGIDO: Navegación más simple y directa.
+        """
         try:
             self.automation_state.update(
                 method_name="_etapa2_navegacion_en_pausa",
@@ -170,24 +173,30 @@ class WebScraperGlosasEnPausa:
             self._log_state("🧭 ETAPA 2: NAVEGACIÓN A EN PAUSA")
             self._log_state("-"*50)
             
-            # Inicializar manejador de navegación
+            # ✅ Inicializar manejador de navegación
             self.navigation_handler = NavigationHandler(self.page, self.automation_state)
             
-            # Navegar a Respuesta Glosas
-            self._log_state("📍 Navegando a Respuesta Glosas...")
-            if not await self.navigation_handler.navigate_to_respuesta_glosas():
-                self._log_state("❌ Error navegando a Respuesta Glosas", "error")
-                return False
+            # ✅ ESTRATEGIA SIMPLE: Una sola llamada al método corregido
+            self._log_state("🎯 Navegando directamente a EN PAUSA...")
             
-            # Navegar específicamente a EN PAUSA
-            self._log_state("📍 Navegando a EN PAUSA...")
-            if not await self.navigation_handler.navigate_to_en_pausa():
-                self._log_state("❌ Error navegando a EN PAUSA", "error")
-                return False
+            # ✅ URL antes de navegación
+            url_antes = self.page.url
+            self._log_state(f"📍 URL antes: {url_antes}")
             
-            self._log_state("✅ ETAPA 2 COMPLETADA: Navegación a EN PAUSA exitosa")
-            self._log_state("-"*50)
-            return True
+            # ✅ Navegación directa (el método ya maneja todo internamente)
+            success = await self.navigation_handler.navigate_to_en_pausa()
+            
+            if success:
+                # ✅ URL después de navegación
+                url_despues = self.page.url
+                self._log_state(f"📍 URL después: {url_despues}")
+                
+                self._log_state("✅ ETAPA 2 COMPLETADA: Navegación a EN PAUSA exitosa")
+                self._log_state("-"*50)
+                return True
+            else:
+                self._log_state("❌ ETAPA 2 FALLIDA: Error en navegación a EN PAUSA", "error")
+                return False
             
         except Exception as e:
             self._log_state(f"❌ Error en ETAPA 2 (navegación EN PAUSA): {e}", "error")
@@ -377,44 +386,51 @@ class WebScraperGlosasEnPausa:
     
     async def _obtener_cuentas_desde_tabla_en_pausa(self) -> List[Dict]:
         """
-        Obtiene cuentas desde la tabla web de EN PAUSA y las marca apropiadamente.
+        Obtiene cuentas desde la tabla web de EN PAUSA.
+        ✅ CORREGIDO: No usa métodos de Bolsa Respuesta.
         """
         try:
-            # Reutilizar el procesador completo para extraer datos
-            await self.procesador_completo._preparar_sistema()
-            todas_las_cuentas = await self.procesador_completo.extraer_datos_filas_tabla()
-            
+            self._log_state("📊 Extrayendo cuentas desde tabla EN PAUSA")
+
+            # ✅ NO usar procesador_completo._preparar_sistema() que puede navegar mal
+            # En su lugar, extraer directamente
+
+            # Configurar tabla para mostrar 100 registros
+            await self._configurar_tabla_en_pausa()
+
+            # Extraer datos directamente de la tabla actual
+            todas_las_cuentas = await self._extraer_datos_tabla_en_pausa()
+
             if not todas_las_cuentas:
                 return []
-            
+
             cuentas_nuevas = []
-            
+
             for cuenta_data in todas_las_cuentas:
                 idcuenta = cuenta_data['idcuenta']
-                
-                # Verificar si debe procesarse
+
                 if self.db_manager.should_process_cuenta(idcuenta):
-                    # Crear/actualizar como PENDIENTE inicialmente
                     cuenta_bd_id = self.db_manager.create_or_update_cuenta(cuenta_data)
-                    
+
                     # Marcar como EN_PROCESO para EN PAUSA
                     self.db_manager.update_cuenta_estado(
                         idcuenta, 
                         EstadoCuenta.EN_PROCESO,
                         "Cuenta importada para reprocesamiento EN PAUSA"
                     )
-                    
+
                     cuenta_data['bd_id'] = cuenta_bd_id
                     cuenta_data['intentos'] = 0
                     cuentas_nuevas.append(cuenta_data)
-                    
+
                     self._log_state(f"✅ Cuenta {idcuenta} importada para EN PAUSA")
-            
+
             return cuentas_nuevas
-            
+
         except Exception as e:
             self._log_state(f"❌ Error obteniendo desde tabla EN PAUSA: {e}", "error")
             return []
+            
     
     async def _incrementar_intentos(self, idcuenta: str):
         """Incrementa el número de intentos para una cuenta."""

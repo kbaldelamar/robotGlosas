@@ -30,9 +30,9 @@ class ProcesadorEnPausaEspecifico:
         
         # Selectores específicos para EN PAUSA
         self.selectores = {
-            'filas_tabla_principal': "#tablaRespuestaGlosa tbody tr",
+            'filas_tabla_principal': "#tablaRespuestaGlosaPause tbody tr",
             'boton_cuenta': ".btRespuestaStart",
-            'info_tabla': "#tablaRespuestaGlosa_info"
+            'info_tabla': "#tablaRespuestaGlosaPause_info"
         }
         
         self.state.update(
@@ -40,7 +40,8 @@ class ProcesadorEnPausaEspecifico:
             method_name="__init__"
         )
         
-        self._log("ProcesadorEnPausaEspecifico inicializado para EN PAUSA")
+        self._log("[TRACE] __init__ de ProcesadorEnPausaEspecifico ejecutado")
+        print("[TRACE] __init__ de ProcesadorEnPausaEspecifico ejecutado")
     
     def _log(self, mensaje: str, nivel: str = "info"):
         """Log con información de estado."""
@@ -57,13 +58,9 @@ class ProcesadorEnPausaEspecifico:
     async def procesar_cuentas_en_pausa(self, cuentas_en_pausa: List[Dict]) -> Tuple[int, int]:
         """
         MÉTODO PRINCIPAL: Procesa cuentas EN PAUSA sin salir de esa sección.
-        
-        Args:
-            cuentas_en_pausa: Lista de cuentas a reprocesar
-            
-        Returns:
-            Tuple[int, int]: (procesadas, fallidas)
         """
+        self._log("[TRACE] procesar_cuentas_en_pausa de ProcesadorEnPausaEspecifico ejecutado")
+        print("[TRACE] procesar_cuentas_en_pausa de ProcesadorEnPausaEspecifico ejecutado")
         try:
             self.state.update(
                 method_name="procesar_cuentas_en_pausa",
@@ -76,9 +73,9 @@ class ProcesadorEnPausaEspecifico:
             self.url_en_pausa_base = self.page.url
             self._log(f"💾 URL EN PAUSA guardada: {self.url_en_pausa_base}")
             
-            # PASO 2: Configurar tabla
-            await self._configurar_tabla_en_pausa()
-            
+            # PASO 2: (Eliminado) Configuración de tabla y esperas innecesarias
+            # Se asume que la tabla ya está lista y visible gracias a NavigationHandler
+
             # PASO 3: Procesar cada cuenta
             procesadas = 0
             fallidas = 0
@@ -92,13 +89,9 @@ class ProcesadorEnPausaEspecifico:
                     # Incrementar intentos
                     await self._incrementar_intentos(idcuenta)
                     
-                    # Asegurar que estamos en EN PAUSA
-                    if not await self._asegurar_en_pausa():
-                        self._log(f"❌ No se pudo regresar a EN PAUSA para cuenta {idcuenta}", "error")
-                        await self._marcar_cuenta_fallida(idcuenta, "No se pudo regresar a EN PAUSA")
-                        fallidas += 1
-                        continue
-                    
+                    # (Eliminado) Asegurar que estamos en EN PAUSA
+                    # Se asume que NavigationHandler ya dejó la tabla lista
+
                     # Buscar y hacer clic en la cuenta EN PAUSA
                     if await self._hacer_clic_cuenta_en_pausa(idcuenta):
                         # Aquí procesarías la cuenta individual
@@ -135,125 +128,61 @@ class ProcesadorEnPausaEspecifico:
             self._log(f"❌ Error en procesamiento EN PAUSA: {e}", "error")
             return 0, 0
     
-    async def _asegurar_en_pausa(self) -> bool:
-        """
-        Se asegura de estar en la sección EN PAUSA.
-        NO navega a Bolsa Respuesta.
-        """
-        try:
-            url_actual = self.page.url
-            
-            # Verificar si estamos en EN PAUSA
-            if "respuestaGlosaPause" in url_actual:
-                self._log("✅ Ya estamos en EN PAUSA")
-                return True
-            
-            # Si no estamos en EN PAUSA, navegar de vuelta
-            if self.url_en_pausa_base and "respuestaGlosaPause" in self.url_en_pausa_base:
-                self._log("🔄 Regresando a EN PAUSA...")
-                await self.page.goto(self.url_en_pausa_base)
-                await self.page.wait_for_load_state('networkidle', timeout=15000)
-                await asyncio.sleep(3)
-                
-                # Verificar que regresamos correctamente
-                url_nueva = self.page.url
-                if "respuestaGlosaPause" in url_nueva:
-                    self._log("✅ Regreso a EN PAUSA exitoso")
-                    return True
-                else:
-                    self._log(f"❌ Error: regresó a {url_nueva} en lugar de EN PAUSA", "error")
-                    return False
-            else:
-                self._log("❌ No hay URL base de EN PAUSA guardada", "error")
-                return False
-            
-        except Exception as e:
-            self._log(f"❌ Error asegurando EN PAUSA: {e}", "error")
-            return False
-    
-    async def _configurar_tabla_en_pausa(self) -> bool:
-        """Configura la tabla EN PAUSA para mostrar 100 registros."""
-        try:
-            self._log("🔧 Configurando tabla EN PAUSA para 100 registros")
-            
-            resultado_js = await self.page.evaluate("""
-                () => {
-                    const select = document.querySelector('select[name="tablaRespuestaGlosa_length"]');
-                    if (!select) return { success: false, error: 'Select no encontrado' };
-                    
-                    const option100 = select.querySelector('option[value="100"]');
-                    if (!option100) return { success: false, error: 'Opción 100 no encontrada' };
-                    
-                    select.value = '100';
-                    select.dispatchEvent(new Event('change', { bubbles: true }));
-                    
-                    return { success: true, valor: select.value };
-                }
-            """)
-            
-            if resultado_js.get('success'):
-                await self.page.wait_for_load_state('networkidle', timeout=15000)
-                await asyncio.sleep(3)
-                self._log("✅ Tabla EN PAUSA configurada exitosamente")
-                return True
-            else:
-                self._log(f"❌ Error configurando tabla EN PAUSA: {resultado_js.get('error')}", "error")
-                return False
-                
-        except Exception as e:
-            self._log(f"❌ Error configurando tabla EN PAUSA: {e}", "error")
-            return False
-    
     async def _hacer_clic_cuenta_en_pausa(self, idcuenta: str) -> bool:
         """
         Busca y hace clic en una cuenta específica EN LA TABLA EN PAUSA.
         """
         try:
             self._log(f"🔍 Buscando cuenta {idcuenta} en tabla EN PAUSA")
-            
+
+            # Esperar explícitamente a que haya al menos una fila en la tabla
+            try:
+                await self.page.wait_for_selector(self.selectores['filas_tabla_principal'], timeout=20000)
+            except Exception as e:
+                self._log(f"⚠️ No se encontraron filas en la tabla tras esperar: {e}", "warning")
+                return False
+
+            # Recrear el locator de filas justo antes de buscar
             filas = self.page.locator(self.selectores['filas_tabla_principal'])
             total_filas = await filas.count()
-            
             self._log(f"📊 Buscando en {total_filas} filas de tabla EN PAUSA")
-            
+
+            # Imprimir los IDs de todas las filas encontradas
+            ids_encontrados = []
             for i in range(total_filas):
                 try:
                     fila = filas.nth(i)
                     celdas = fila.locator("td")
-                    
                     if await celdas.count() > 0:
                         id_celda = await celdas.nth(0).text_content()
                         id_celda = id_celda.strip()
-                        
-                        if id_celda == idcuenta:
-                            self._log(f"✅ Cuenta {idcuenta} encontrada en fila {i} de EN PAUSA")
-                            
-                            # Buscar el botón dentro de esta fila
-                            boton_cuenta = fila.locator(self.selectores['boton_cuenta'])
-                            
-                            if await boton_cuenta.count() > 0:
-                                await boton_cuenta.first.scroll_into_view_if_needed()
-                                await asyncio.sleep(1)
-                                await boton_cuenta.first.click()
-                                
-                                self._log(f"🖱️ Clic realizado en cuenta {idcuenta} EN PAUSA")
-                                
-                                # Esperar a que cargue
-                                await self.page.wait_for_load_state('networkidle', timeout=15000)
-                                await asyncio.sleep(3)
-                                
-                                return True
-                            else:
-                                self._log(f"❌ No se encontró botón para cuenta {idcuenta} en EN PAUSA", "error")
-                                return False
-                
+                        ids_encontrados.append(id_celda)
                 except Exception as e:
-                    self._log(f"⚠️ Error verificando fila {i}: {e}", "warning")
+                    self._log(f"⚠️ Error leyendo fila {i}: {e}", "warning")
                     continue
-            
+            self._log(f"🔎 IDs encontrados en tabla: {ids_encontrados}")
+
+            # Buscar el ID objetivo
+            for i, id_celda in enumerate(ids_encontrados):
+                if id_celda == idcuenta:
+                    self._log(f"✅ Cuenta {idcuenta} encontrada en fila {i} de EN PAUSA")
+                    fila = filas.nth(i)
+                    boton_cuenta = fila.locator(self.selectores['boton_cuenta'])
+                    if await boton_cuenta.count() > 0:
+                        await boton_cuenta.first.scroll_into_view_if_needed()
+                        await asyncio.sleep(1)
+                        await boton_cuenta.first.click()
+                        self._log(f"🖱️ Clic realizado en cuenta {idcuenta} EN PAUSA")
+                        await self.page.wait_for_load_state('networkidle', timeout=15000)
+                        await asyncio.sleep(3)
+                        return True
+                    else:
+                        self._log(f"❌ No se encontró botón para cuenta {idcuenta} en EN PAUSA", "error")
+                        return False
+
             self._log(f"❌ Cuenta {idcuenta} NO encontrada en tabla EN PAUSA", "error")
             return False
-            
+
         except Exception as e:
             self._log(f"❌ Error buscando cuenta {idcuenta} en EN PAUSA: {e}", "error")
             return False

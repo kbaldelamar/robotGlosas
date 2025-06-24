@@ -86,7 +86,6 @@ class NavigationHandler:
     async def navigate_to_respuesta_glosas(self) -> bool:
         """
         Navega al menú 'Respuesta Glosas'.
-        
         Returns:
             bool: True si la navegación fue exitosa
         """
@@ -95,42 +94,31 @@ class NavigationHandler:
                 method_name="navigate_to_respuesta_glosas",
                 action="Navegando a Respuesta Glosas"
             )
-            
             self._log_state("Iniciando navegación a Respuesta Glosas")
-            
             # Actualizar información de página actual
             await self._update_page_info()
-            
             # USAR SOLO EL SELECTOR QUE FUNCIONA - XPath específico
             selector = "//span[@class='sidebar-nav-name'][contains(.,'Respuesta Glosas')]"
-            
             # Buscar el elemento
             element = self.page.locator(f"xpath={selector}")
-            
             # Verificar que existe
             if await element.count() == 0:
                 self._log_state("No se encontró el menú 'Respuesta Glosas'", "error")
                 await self.page.screenshot(path="error_no_respuesta_glosas_menu.png")
                 self.state.update(state=NavigationState.ERROR)
                 return False
-            
             self._log_state("Elemento 'Respuesta Glosas' encontrado")
-            
             # Hacer scroll al elemento si es necesario
             await element.scroll_into_view_if_needed()
             await asyncio.sleep(0.5)
-            
             # Hacer clic en "Respuesta Glosas"
             await element.click()
             self._log_state("Clic realizado en 'Respuesta Glosas'")
-            
             # Esperar a que cargue
             await self.page.wait_for_load_state('networkidle', timeout=10000)
             await asyncio.sleep(1)
-            
             # Verificar que la navegación fue exitosa
             success = await self._verify_respuesta_glosas_loaded()
-            
             if success:
                 self.state.update(
                     state=NavigationState.RESPUESTA_GLOSAS_MENU,
@@ -142,11 +130,68 @@ class NavigationHandler:
                 self.state.update(state=NavigationState.ERROR)
                 self._log_state("Falló la verificación de navegación a Respuesta Glosas", "error")
                 return False
-                
         except Exception as e:
             self.state.update(state=NavigationState.ERROR)
             self._log_state(f"Error navegando a Respuesta Glosas: {e}", "error")
             await self.page.screenshot(path="error_navigate_respuesta_glosas.png")
+            return False
+
+    async def navigate_to_bolsa_respuesta(self) -> bool:
+        """
+        Navega al submenú 'Bolsa Respuesta' (debe estar en Respuesta Glosas primero).
+        Returns:
+            bool: True si la navegación fue exitosa
+        """
+        try:
+            self.state.update(
+                method_name="navigate_to_bolsa_respuesta",
+                action="Navegando a Bolsa Respuesta"
+            )
+            self._log_state("Iniciando navegación a Bolsa Respuesta")
+            # Verificar que estamos en el estado correcto
+            if self.state.current_state != NavigationState.RESPUESTA_GLOSAS_MENU:
+                self._log_state("No estamos en Respuesta Glosas, navegando primero...", "warning")
+                if not await self.navigate_to_respuesta_glosas():
+                    return False
+            # Actualizar información de página actual
+            await self._update_page_info()
+            # USAR SOLO EL SELECTOR QUE FUNCIONA - XPath específico
+            selector = "//span[@class='sidebar-nav-name'][contains(.,'Bolsa Respuesta')]"
+            # Buscar el elemento
+            element = self.page.locator(f"xpath={selector}")
+            # Verificar que existe
+            if await element.count() == 0:
+                self._log_state("No se encontró el submenú 'Bolsa Respuesta'", "error")
+                await self.page.screenshot(path="error_no_bolsa_respuesta_menu.png")
+                self.state.update(state=NavigationState.ERROR)
+                return False
+            self._log_state("Elemento 'Bolsa Respuesta' encontrado")
+            # Hacer scroll al elemento si es necesario
+            await element.scroll_into_view_if_needed()
+            await asyncio.sleep(0.5)
+            # Hacer clic en "Bolsa Respuesta"
+            await element.click()
+            self._log_state("Clic realizado en 'Bolsa Respuesta'")
+            # Esperar a que cargue
+            await self.page.wait_for_load_state('networkidle', timeout=15000)
+            await asyncio.sleep(2)
+            # Verificar que la navegación fue exitosa
+            success = await self._verify_bolsa_respuesta_loaded()
+            if success:
+                self.state.update(
+                    state=NavigationState.BOLSA_RESPUESTA,
+                    action="Navegación a Bolsa Respuesta exitosa"
+                )
+                self._log_state("Navegación a Bolsa Respuesta completada exitosamente")
+                return True
+            else:
+                self.state.update(state=NavigationState.ERROR)
+                self._log_state("Falló la verificación de navegación a Bolsa Respuesta", "error")
+                return False
+        except Exception as e:
+            self.state.update(state=NavigationState.ERROR)
+            self._log_state(f"Error navegando a Bolsa Respuesta: {e}", "error")
+            await self.page.screenshot(path="error_navigate_bolsa_respuesta.png")
             return False
     async def _verify_respuesta_glosas_loaded(self) -> bool:
         """
@@ -329,10 +374,10 @@ class NavigationHandler:
         """
         try:
             self._log_state("🔧 === CONFIGURACIÓN CON JAVASCRIPT (como Bolsa Respuesta) ===")
-    
+
             # PASO 1: Usar JavaScript directo para configurar
             self._log_state("⚡ Ejecutando JavaScript para configurar tabla...")
-            
+
             resultado_js = await self.page.evaluate("""
                 () => {
                     // Buscar el select de En Pausa
@@ -340,20 +385,20 @@ class NavigationHandler:
                     if (!select) {
                         return { success: false, error: 'Select de En Pausa no encontrado' };
                     }
-                    
+
                     // Verificar opciones disponibles
                     const opciones = Array.from(select.options).map(opt => ({
                         value: opt.value,
                         text: opt.textContent.trim()
                     }));
-                    
+
                     // Intentar con 500 primero (más seguro que Todos)
                     const opcion500 = select.querySelector('option[value="500"]');
                     if (opcion500) {
                         select.value = '500';
                         select.dispatchEvent(new Event('change', { bubbles: true }));
                         select.dispatchEvent(new Event('input', { bubbles: true }));
-                        
+
                         return { 
                             success: true, 
                             valor: select.value,
@@ -361,14 +406,14 @@ class NavigationHandler:
                             opciones: opciones
                         };
                     }
-                    
+
                     // Si no hay 500, intentar con Todos
                     const opcionTodos = select.querySelector('option[value="-1"]');
                     if (opcionTodos) {
                         select.value = '-1';
                         select.dispatchEvent(new Event('change', { bubbles: true }));
                         select.dispatchEvent(new Event('input', { bubbles: true }));
-                        
+
                         return { 
                             success: true, 
                             valor: select.value,
@@ -376,7 +421,7 @@ class NavigationHandler:
                             opciones: opciones
                         };
                     }
-                    
+
                     return { 
                         success: false, 
                         error: 'No se encontraron opciones 500 o Todos',
@@ -384,31 +429,31 @@ class NavigationHandler:
                     };
                 }
             """)
-            
+
             # PASO 2: Verificar resultado del JavaScript
             if resultado_js.get('success'):
                 self._log_state(f"✅ JavaScript exitoso - Opción usada: {resultado_js['opcionUsada']}")
                 self._log_state(f"📋 Valor configurado: {resultado_js['valor']}")
-                
+
                 # Mostrar opciones disponibles
                 opciones = resultado_js.get('opciones', [])
                 self._log_state(f"📊 Opciones disponibles: {len(opciones)}")
                 for opcion in opciones:
                     self._log_state(f"   • Valor: '{opcion['value']}' - Texto: '{opcion['text']}'")
-                
+
                 # PASO 3: Esperar que se recargue la tabla
                 self._log_state("⏳ Esperando recarga de tabla con JavaScript...")
                 await self.page.wait_for_load_state('networkidle', timeout=20000)
                 await asyncio.sleep(4)  # Tiempo extra para carga completa
-                
+
                 # PASO 4: Verificar resultado final
                 filas_tabla = self.page.locator("#tablaRespuestaGlosa tbody tr")
                 total_filas = await filas_tabla.count()
                 self._log_state(f"📊 Filas en tabla después de JavaScript: {total_filas}")
-                
+
                 if total_filas > 0:
                     self._log_state("🎉 ¡CONFIGURACIÓN EXITOSA! Tabla cargada con datos")
-                    
+
                     # Verificar valor final
                     valor_final = await self.page.evaluate("""
                         () => {
@@ -417,34 +462,34 @@ class NavigationHandler:
                         }
                     """)
                     self._log_state(f"🔍 Valor final confirmado: {valor_final}")
-                    
+
                 else:
                     self._log_state("⚠️ Tabla sigue vacía - puede necesitar más tiempo de carga", "warning")
-                    
+
                     # Intentar esperar un poco más
                     self._log_state("⏳ Esperando 5 segundos adicionales...")
                     await asyncio.sleep(5)
-                    
+
                     # Verificar de nuevo
                     total_filas_2 = await filas_tabla.count()
                     self._log_state(f"📊 Filas después de espera adicional: {total_filas_2}")
-                    
+
             else:
                 self._log_state(f"❌ JavaScript falló: {resultado_js.get('error')}", "error")
-                
+
                 # Mostrar opciones disponibles para debug
                 opciones = resultado_js.get('opciones', [])
                 if opciones:
                     self._log_state(f"🔍 Opciones encontradas: {len(opciones)}")
                     for opcion in opciones:
                         self._log_state(f"   • Valor: '{opcion['value']}' - Texto: '{opcion['text']}'")
-                
+
                 # FALLBACK: Intentar con método básico
                 self._log_state("🔄 Intentando fallback con JavaScript básico...")
                 await self._fallback_configuracion_basica()
-            
+
             self._log_state("🔧 === CONFIGURACIÓN JAVASCRIPT TERMINADA ===")
-    
+
         except Exception as e:
             self._log_state(f"❌ ERROR CRÍTICO en configuración JavaScript: {e}", "error")
             import traceback

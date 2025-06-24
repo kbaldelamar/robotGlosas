@@ -8,6 +8,7 @@ from automation.navigation_handler import NavigationHandler, AutomationState, Na
 
 # ✅ CAMBIO PRINCIPAL: Usar el procesador heredado
 from automation.procesador_glosas_en_pausa_heredado import ProcesadorGlosasEnPausaHeredado
+from automation.procesador_en_pausa_especifico import ProcesadorEnPausaEspecifico
 
 from database.db_manager_glosas import DatabaseManagerGlosas
 from database.models_glosas import EstadoCuenta
@@ -38,7 +39,7 @@ class WebScraperGlosasEnPausaActualizado:
         self.navigation_handler: Optional[NavigationHandler] = None
         
         # ✅ CAMBIO: Usar procesador heredado específico
-        self.procesador_en_pausa: Optional[ProcesadorGlosasEnPausaHeredado] = None
+        self.procesador_en_pausa: Optional[ProcesadorEnPausaEspecifico] = None
         
         self.page: Optional[Page] = None
         self.worker = worker_thread
@@ -246,8 +247,8 @@ class WebScraperGlosasEnPausaActualizado:
                 self.worker.emit_data_imported(len(cuentas_en_pausa))
                 await asyncio.sleep(1)
             
-            # ✅ INICIALIZAR PROCESADOR HEREDADO
-            self.procesador_en_pausa = ProcesadorGlosasEnPausaHeredado(
+            # ✅ INICIALIZAR PROCESADOR ESPECÍFICO PARA EN PAUSA
+            self.procesador_en_pausa = ProcesadorEnPausaEspecifico(
                 self.page, 
                 self.automation_state,
                 worker_thread=self.worker
@@ -258,7 +259,7 @@ class WebScraperGlosasEnPausaActualizado:
             self._log_state("✅ Funcionalidad: 100% heredada + navegación adaptada")
             
             # ✅ USAR MÉTODO ESPECÍFICO DEL PROCESADOR HEREDADO
-            cuentas_recuperadas, cuentas_fallidas = await self.procesador_en_pausa.procesar_cuentas_en_pausa_especificas(cuentas_en_pausa)
+            cuentas_recuperadas, cuentas_fallidas = await self.procesador_en_pausa.procesar_cuentas_en_pausa(cuentas_en_pausa)
             
             # Actualizar estadísticas globales
             self.estadisticas_globales['total_cuentas_procesadas'] = cuentas_recuperadas + cuentas_fallidas
