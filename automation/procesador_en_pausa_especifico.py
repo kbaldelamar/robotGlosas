@@ -14,6 +14,7 @@ from automation.navigation_handler import AutomationState
 from automation.procesador_completo_glosas_final import ProcesadorCompletoGlosasImplementado
 
 
+
 class ProcesadorEnPausaEspecifico(ProcesadorCompletoGlosasImplementado):
     """
     Procesador específico para módulo EN PAUSA.
@@ -26,24 +27,17 @@ class ProcesadorEnPausaEspecifico(ProcesadorCompletoGlosasImplementado):
         self.logger = logging.getLogger(__name__)
         self.db_manager = DatabaseManagerGlosas()
         self.worker = worker_thread
-        
-        # URL base para EN PAUSA (NO Bolsa Respuesta)
-        self.url_en_pausa_base = None
-        
-        # Selectores específicos para EN PAUSA
+
+        # Selector para las filas de la tabla EN PAUSA (ajusta según tu HTML real)
         self.selectores = {
-            'filas_tabla_principal': "#tablaRespuestaGlosaPause tbody tr",
-            'boton_cuenta': ".btRespuestaStart",
-            'info_tabla': "#tablaRespuestaGlosaPause_info"
+            "filas_tabla_principal": "table#tablaRespuestaGlosaPause > tbody > tr"
         }
-        
+
         self.state.update(
             class_name="ProcesadorEnPausaEspecifico",
             method_name="__init__"
         )
-        
-        self._log("[TRACE] __init__ de ProcesadorEnPausaEspecifico ejecutado")
-        print("[TRACE] __init__ de ProcesadorEnPausaEspecifico ejecutado")
+        self._log("[CORREGIDO] ProcesadorEnPausaEspecifico inicializado con procesador heredado")
     
     def _log(self, mensaje: str, nivel: str = "info"):
         """Log con información de estado."""
@@ -57,78 +51,24 @@ class ProcesadorEnPausaEspecifico(ProcesadorCompletoGlosasImplementado):
         elif nivel == "error":
             self.logger.error(mensaje_completo)
     
+ 
+    
     async def procesar_cuentas_en_pausa(self, cuentas_en_pausa: List[Dict]) -> Tuple[int, int]:
         """
-        MÉTODO PRINCIPAL: Procesa cuentas EN PAUSA sin salir de esa sección.
+        Procesa las cuentas en pausa usando la lógica heredada.
         """
-        self._log("[TRACE] procesar_cuentas_en_pausa de ProcesadorEnPausaEspecifico ejecutado")
-        print("[TRACE] procesar_cuentas_en_pausa de ProcesadorEnPausaEspecifico ejecutado")
         try:
             self.state.update(
                 method_name="procesar_cuentas_en_pausa",
-                action="Procesando cuentas EN PAUSA específicamente"
+                action="Procesando cuentas en pausa usando lógica base"
             )
-            
-            self._log(f"🔄 INICIANDO PROCESAMIENTO EN PAUSA DE {len(cuentas_en_pausa)} CUENTAS")
-            
-            # PASO 1: Guardar URL actual de EN PAUSA
-            self.url_en_pausa_base = self.page.url
-            self._log(f"💾 URL EN PAUSA guardada: {self.url_en_pausa_base}")
-            
-            # PASO 2: (Eliminado) Configuración de tabla y esperas innecesarias
-            # Se asume que la tabla ya está lista y visible gracias a NavigationHandler
-
-            # PASO 3: Procesar cada cuenta
-            await self._preparar_sistema()
-            procesadas = 0
-            fallidas = 0
-            
-            for i, cuenta_data in enumerate(cuentas_en_pausa):
-                idcuenta = cuenta_data['idcuenta']
-                
-                self._log(f"🔄 PROCESANDO {i + 1}/{len(cuentas_en_pausa)}: {idcuenta}")
-                
-                try:
-                    # Incrementar intentos
-                    await self._incrementar_intentos(idcuenta)
-                    
-                    # (Eliminado) Asegurar que estamos en EN PAUSA
-                    # Se asume que NavigationHandler ya dejó la tabla lista
-
-                    # Buscar y hacer clic en la cuenta EN PAUSA
-                    if await self._hacer_clic_cuenta_en_pausa(idcuenta):
-                        # Aquí procesarías la cuenta individual
-                        # Por simplicidad, la marcamos como procesada
-                        await self._marcar_cuenta_procesada(idcuenta)
-                        procesadas += 1
-                        
-                        if self.worker:
-                            self.worker.emit_cuenta_processed(idcuenta, 'COMPLETADO')
-                        
-                        self._log(f"✅ CUENTA {idcuenta} PROCESADA EN PAUSA")
-                    else:
-                        await self._marcar_cuenta_fallida(idcuenta, "No se encontró en tabla EN PAUSA")
-                        fallidas += 1
-                        
-                        if self.worker:
-                            self.worker.emit_cuenta_processed(idcuenta, 'FALLIDO')
-                        
-                        self._log(f"❌ CUENTA {idcuenta} NO ENCONTRADA EN PAUSA")
-                
-                except Exception as e:
-                    error_msg = f"Error procesando cuenta {idcuenta}: {e}"
-                    self._log(error_msg, "error")
-                    await self._marcar_cuenta_fallida(idcuenta, error_msg)
-                    fallidas += 1
-                
-                # Pausa entre cuentas
-                await asyncio.sleep(2)
-            
-            self._log(f"🎉 PROCESAMIENTO EN PAUSA COMPLETADO: {procesadas} procesadas, {fallidas} fallidas")
+            self._log(f"🔄 Procesando {len(cuentas_en_pausa)} cuentas EN PAUSA")
+            # Llama al método heredado (ajusta el nombre si es diferente)
+            procesadas, fallidas = await self.procesar_cuentas_en_pausa_especificas(cuentas_en_pausa)
+            self._log(f"✅ Procesamiento completado: Procesadas: {procesadas} | Fallidas: {fallidas}")
             return procesadas, fallidas
-            
         except Exception as e:
-            self._log(f"❌ Error en procesamiento EN PAUSA: {e}", "error")
+            self._log(f"❌ Error en procesamiento: {e}", "error")
             return 0, 0
     
     async def _hacer_clic_cuenta_en_pausa(self, idcuenta: str) -> bool:
@@ -231,3 +171,73 @@ class ProcesadorEnPausaEspecifico(ProcesadorCompletoGlosasImplementado):
             self._log(f"❌ Cuenta {idcuenta} marcada como FALLIDA: {motivo}")
         except Exception as e:
             self._log(f"❌ Error marcando cuenta como procesada {idcuenta}: {e}", "error")
+    
+    async def extraer_datos_filas_tabla(self) -> List[Dict]:
+        """
+        Extrae los datos de todas las filas visibles en la tabla EN PAUSA.
+        Retorna una lista de diccionarios con los datos de cada cuenta.
+        """
+        self._log("📋 Extrayendo datos de filas de la tabla EN PAUSA")
+        cuentas = []
+        try:
+            # Ajusta el selector al de la tabla EN PAUSA
+            filas = self.page.locator(self.selectores['filas_tabla_principal'])
+            total_filas = await filas.count()
+            self._log(f"🔎 Total filas encontradas en EN PAUSA: {total_filas}")
+
+            for i in range(total_filas):
+                fila = filas.nth(i)
+                celdas = fila.locator("td")
+                if await celdas.count() < 5:
+                    continue  # Salta filas incompletas
+
+                # Ajusta los índices según el orden de columnas de la tabla EN PAUSA
+                idcuenta = (await celdas.nth(0).text_content() or "").strip()
+                proveedor = (await celdas.nth(1).text_content() or "").strip()
+                estado = (await celdas.nth(2).text_content() or "").strip()
+                valor_glosado = (await celdas.nth(3).text_content() or "").strip()
+                fecha_radicacion = (await celdas.nth(4).text_content() or "").strip()
+                # Agrega más campos si tu tabla tiene más columnas relevantes
+
+                cuentas.append({
+                    "idcuenta": idcuenta,
+                    "proveedor": proveedor,
+                    "estado": estado,
+                    "valor_glosado": valor_glosado,
+                    "fecha_radicacion": fecha_radicacion,
+                    # ...otros campos si es necesario...
+                })
+            self._log(f"✅ Extracción completada. Total cuentas: {len(cuentas)}")
+        except Exception as e:
+            self._log(f"❌ Error extrayendo filas de tabla EN PAUSA: {e}", "error")
+        return cuentas
+    
+    async def procesar_y_guardar_cuentas(self, cuentas_extraidas: List[Dict]):
+        """
+        Guarda las cuentas extraídas en la base de datos con estado FALLIDO.
+        """
+        self._log(f"💾 Guardando {len(cuentas_extraidas)} cuentas EN PAUSA en base de datos")
+        try:
+            for cuenta in cuentas_extraidas:
+                self.db_manager.crear_cuenta_glosa_pausa(
+                    idcuenta=cuenta['idcuenta'],
+                    proveedor=cuenta['proveedor'],
+                    valor_glosado=cuenta['valor_glosado'],
+                    fecha_radicacion=cuenta['fecha_radicacion'],
+                    # ...otros campos si necesitas...
+                )
+            self._log(f"✅ Guardado completado. Total cuentas guardadas: {len(cuentas_extraidas)}")
+        except Exception as e:
+            self._log(f"❌ Error guardando cuentas en base de datos: {e}", "error")
+    
+    async def ejecutar(self):
+        """Método principal para ejecutar el procesador en pausa específico."""
+        self._log("▶️ Iniciando procesamiento de cuentas en pausa")
+        try:
+            # Extraer cuentas en pausa de la tabla
+            cuentas_extraidas = await self.extraer_datos_filas_tabla()
+            await self.procesar_y_guardar_cuentas(cuentas_extraidas)
+
+            self._log("✅ Proceso de cuentas en pausa completado")
+        except Exception as e:
+            self._log(f"❌ Error en el proceso de cuentas en pausa: {e}", "error")
