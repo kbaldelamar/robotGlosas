@@ -7,7 +7,6 @@ from automation.login_handler import LoginHandler
 from automation.navigation_handler import NavigationHandler, AutomationState, NavigationState
 
 # ✅ CAMBIO PRINCIPAL: Usar el procesador heredado
-from automation.procesador_glosas_en_pausa_heredado import ProcesadorGlosasEnPausaHeredado
 from automation.procesador_en_pausa_especifico import ProcesadorEnPausaEspecifico
 
 from database.db_manager_glosas import DatabaseManagerGlosas
@@ -210,7 +209,7 @@ class WebScraperGlosasEnPausaActualizado:
     async def _etapa3_procesamiento_con_herencia(self) -> bool:
         """
         ETAPA 3: Procesamiento con herencia completa.
-        ✅ USA: ProcesadorGlosasEnPausaHeredado que hereda TODA la funcionalidad.
+        ✅ USA: ProcesadorEnPausaEspecifico que hereda TODA la funcionalidad.
         
         Returns:
             bool: True si se procesó correctamente
@@ -255,7 +254,7 @@ class WebScraperGlosasEnPausaActualizado:
             )
             
             self._log_state(f"🚀 Iniciando reprocesamiento HEREDADO de {len(cuentas_en_pausa)} cuentas EN PAUSA")
-            self._log_state("✅ Procesador: ProcesadorGlosasEnPausaHeredado")
+            self._log_state("✅ Procesador: ProcesadorEnPausaEspecifico")
             self._log_state("✅ Funcionalidad: 100% heredada + navegación adaptada")
             
             # ✅ USAR MÉTODO ESPECÍFICO DEL PROCESADOR HEREDADO
@@ -347,7 +346,7 @@ class WebScraperGlosasEnPausaActualizado:
         """
         try:
             # ✅ USAR HERENCIA: Crear procesador temporal para extracción
-            procesador_temp = ProcesadorGlosasEnPausaHeredado(
+            procesador_temp = ProcesadorEnPausaEspecifico(
                 self.page, 
                 self.automation_state
             )
@@ -417,7 +416,7 @@ class WebScraperGlosasEnPausaActualizado:
             
             self._log_state("")
             self._log_state("🎯 FUNCIONALIDADES HEREDADAS UTILIZADAS:")
-            self._log_state("   ✅ ProcesadorGlosasEnPausaHeredado")
+            self._log_state("   ✅ ProcesadorEnPausaEspecifico")
             self._log_state("   ✅ Lógica completa de procesamiento de glosas")
             self._log_state("   ✅ Manejo de modales y respuestas automáticas")
             self._log_state("   ✅ Sistema de configuraciones de BD")

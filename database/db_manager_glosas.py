@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from datetime import datetime
 from database.db_manager import DatabaseManager
 from database.models_glosas import CuentaGlosasPrincipal, GlosaItemDetalle, EstadoCuenta
@@ -369,3 +369,24 @@ class DatabaseManagerGlosas(DatabaseManager):
         except sqlite3.Error as e:
             self.logger.error(f"Error obteniendo cuentas pendientes: {e}")
             return []
+    
+    def crear_cuenta_glosa_pausa(self, idcuenta, proveedor, valor_glosado, fecha_radicacion, **kwargs):
+        print(f"⚠️ [DEBUG] crear_cuenta_glosa_pausa llamado para idcuenta={idcuenta}")  # <-- Depuración
+        self.logger.info(f"⚠️ [DEBUG] creando cuenta EN PAUSA {idcuenta} como FALLIDO")
+       
+        """
+        Crea una cuenta glosa para EN PAUSA con estado FALLIDO por defecto.
+        """
+        with self.get_connection() as conn:
+            conn.execute("""
+                INSERT INTO cuenta_glosas_principal 
+                (idcuenta, proveedor, estado, valor_glosado, fecha_radicacion)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                idcuenta,
+                proveedor,
+                "FALLIDO",  # Estado fijo para EN PAUSA
+                valor_glosado,
+                fecha_radicacion
+            ))
+            conn.commit()
