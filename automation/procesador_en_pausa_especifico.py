@@ -1298,7 +1298,7 @@ class ProcesadorEnPausaEspecifico:
                            COALESCE(intentos, 0) as intentos
                     FROM cuenta_glosas_principal 
                     WHERE estado IN ('PENDIENTE', 'FALLIDO') 
-                    AND COALESCE(intentos, 0) < 2
+                    AND COALESCE(intentos, 0) < 5
                     ORDER BY created_at ASC
                 """)
 
