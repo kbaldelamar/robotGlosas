@@ -7,7 +7,6 @@ from automation.login_handler import LoginHandler
 from automation.navigation_handler import NavigationHandler, AutomationState, NavigationState
 
 # ✅ CAMBIO PRINCIPAL: Usar el procesador heredado
-from automation.procesador_glosas_en_pausa_heredado import ProcesadorGlosasEnPausaHeredado
 from automation.procesador_en_pausa_especifico import ProcesadorEnPausaEspecifico
 
 from database.db_manager_glosas import DatabaseManagerGlosas
@@ -210,7 +209,7 @@ class WebScraperGlosasEnPausaActualizado:
     async def _etapa3_procesamiento_con_herencia(self) -> bool:
         """
         ETAPA 3: Procesamiento con herencia completa.
-        ✅ USA: ProcesadorGlosasEnPausaHeredado que hereda TODA la funcionalidad.
+        ✅ USA: ProcesadorEnPausaEspecifico que hereda TODA la funcionalidad.
         
         Returns:
             bool: True si se procesó correctamente
@@ -255,7 +254,7 @@ class WebScraperGlosasEnPausaActualizado:
             )
             
             self._log_state(f"🚀 Iniciando reprocesamiento HEREDADO de {len(cuentas_en_pausa)} cuentas EN PAUSA")
-            self._log_state("✅ Procesador: ProcesadorGlosasEnPausaHeredado")
+            self._log_state("✅ Procesador: ProcesadorEnPausaEspecifico")
             self._log_state("✅ Funcionalidad: 100% heredada + navegación adaptada")
             
             # ✅ USAR MÉTODO ESPECÍFICO DEL PROCESADOR HEREDADO
@@ -343,11 +342,11 @@ class WebScraperGlosasEnPausaActualizado:
     
     async def _obtener_cuentas_desde_tabla_en_pausa(self) -> List[Dict]:
         """
-        ✅ SIMPLIFICADO: Usa el procesador heredado para extraer datos.
+        ✅ CORREGIDO: Usa el método específico para EN PAUSA.
         """
         try:
             # ✅ USAR HERENCIA: Crear procesador temporal para extracción
-            procesador_temp = ProcesadorGlosasEnPausaHeredado(
+            procesador_temp = ProcesadorEnPausaEspecifico(
                 self.page, 
                 self.automation_state
             )
@@ -364,23 +363,48 @@ class WebScraperGlosasEnPausaActualizado:
             for cuenta_data in todas_las_cuentas:
                 idcuenta = cuenta_data['idcuenta']
                 
-                # Verificar si debe procesarse
-                if self.db_manager.should_process_cuenta(idcuenta):
-                    # Crear/actualizar como PENDIENTE inicialmente
-                    cuenta_bd_id = self.db_manager.create_or_update_cuenta(cuenta_data)
-                    
-                    # Marcar como EN_PROCESO para EN PAUSA
-                    self.db_manager.update_cuenta_estado(
-                        idcuenta, 
-                        EstadoCuenta.EN_PROCESO,
-                        "Cuenta importada para reprocesamiento EN PAUSA con herencia"
+                # ✅ VERIFICAR: Solo si no existe en BD
+                estado_actual = self.db_manager.get_cuenta_estado(idcuenta)
+                
+                if estado_actual is None:
+                    # ✅ CORRECCIÓN: Usar método específico EN PAUSA
+                    self.db_manager.crear_cuenta_glosa_pausa(
+                        idcuenta=cuenta_data['idcuenta'],
+                        proveedor=cuenta_data.get('proveedor', ''),
+                        valor_glosado=cuenta_data.get('valor_glosado', ''),
+                        fecha_radicacion=cuenta_data.get('fecha_radicacion', '')
                     )
                     
-                    cuenta_data['bd_id'] = cuenta_bd_id
                     cuenta_data['intentos'] = 0
+                    cuenta_data['estado'] = 'FALLIDO'  # Como define el método específico
                     cuentas_nuevas.append(cuenta_data)
                     
-                    self._log_state(f"✅ Cuenta {idcuenta} importada para EN PAUSA con herencia")
+                    self._log_state(f"✅ Cuenta {idcuenta} importada para EN PAUSA con método específico")
+                else:
+                    # Si ya existe, verificar si es procesable
+                    if estado_actual in [EstadoCuenta.FALLIDO, EstadoCuenta.EN_PROCESO]:
+                        # Obtener datos completos desde BD
+                        with self.db_manager.get_connection() as conn:
+                            cursor = conn.execute("""
+                                SELECT idcuenta, proveedor, estado, valor_glosado, 
+                                       fecha_radicacion, COALESCE(intentos, 0) as intentos
+                                FROM cuenta_glosas_principal 
+                                WHERE idcuenta = ?
+                            """, (idcuenta,))
+                            
+                            row = cursor.fetchone()
+                            if row and row['intentos'] < 5:
+                                cuenta_data_bd = {
+                                    'idcuenta': row['idcuenta'],
+                                    'proveedor': row['proveedor'],
+                                    'estado': row['estado'],
+                                    'valor_glosado': row['valor_glosado'],
+                                    'fecha_radicacion': row['fecha_radicacion'],
+                                    'intentos': row['intentos']
+                                }
+                                cuentas_nuevas.append(cuenta_data_bd)
+                                
+                                self._log_state(f"✅ Cuenta {idcuenta} ya existe y es procesable (intentos: {row['intentos']})")
             
             return cuentas_nuevas
             
@@ -417,7 +441,7 @@ class WebScraperGlosasEnPausaActualizado:
             
             self._log_state("")
             self._log_state("🎯 FUNCIONALIDADES HEREDADAS UTILIZADAS:")
-            self._log_state("   ✅ ProcesadorGlosasEnPausaHeredado")
+            self._log_state("   ✅ ProcesadorEnPausaEspecifico")
             self._log_state("   ✅ Lógica completa de procesamiento de glosas")
             self._log_state("   ✅ Manejo de modales y respuestas automáticas")
             self._log_state("   ✅ Sistema de configuraciones de BD")

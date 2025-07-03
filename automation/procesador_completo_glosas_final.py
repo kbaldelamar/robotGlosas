@@ -160,6 +160,12 @@ class ProcesadorCompletoGlosasImplementado:
                         self._log("🚨 Navegador/contexto cerrado. Deteniendo procesamiento de cuentas.", "error")
                         if self.worker and hasattr(self.worker, "stop"):
                             self.worker.stop()
+                        # Cierra el navegador/contexto si tienes acceso
+                        if hasattr(self, "browser") and self.browser:
+                            try:
+                                await self.browser.close()
+                            except Exception as e2:
+                                self._log(f"❌ Error cerrando navegador/contexto: {e2}", "error")
                         break
                     # Si no es cierre de navegador, sigue con el manejo normal
                     await self._marcar_cuenta_fallida(idcuenta, error_msg)
@@ -1639,6 +1645,7 @@ class ProcesadorCompletoGlosasImplementado:
         """
         try:
             # Buscar la tabla de glosas y hacer scroll
+            
             tabla_glosas = self.page.locator(self.selectores['tabla_glosas'])
 
             if await tabla_glosas.count() > 0:

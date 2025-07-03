@@ -25,6 +25,7 @@ def main():
     
     # Crear y mostrar ventana principal
     window = MainWindow()
+    window.resize(1200, 990)  # <-- Añade esta línea para aumentar el tamaño
     window.show()
     
     logger.info("Aplicación iniciada correctamente")
