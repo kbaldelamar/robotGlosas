@@ -45,11 +45,11 @@ class Settings:
     GLOSAS_URL = "https://vco.ctamedicas.com/app/"
     
     # Credenciales (en producción usar variables de entorno)
-    #DEFAULT_USERNAME = os.getenv('BOOTGESTOR_USERNAME', '50011648301')
-    #DEFAULT_PASSWORD = os.getenv('BOOTGESTOR_PASSWORD', 'Uh8Ai0Hg1Sr1')
+    DEFAULT_USERNAME = os.getenv('BOOTGESTOR_USERNAME', '50011648301')
+    DEFAULT_PASSWORD = os.getenv('BOOTGESTOR_PASSWORD', 'Uh8Ai0Hg1Sr1')
 
-    DEFAULT_USERNAME = os.getenv('BOOTGESTOR_USERNAME', '230790043001')
-    DEFAULT_PASSWORD = os.getenv('BOOTGESTOR_PASSWORD', 'Tw2Vm2Hr4Yu9')
+    #DEFAULT_USERNAME = os.getenv('BOOTGESTOR_USERNAME', '230790043001')
+    #DEFAULT_PASSWORD = os.getenv('BOOTGESTOR_PASSWORD', 'Tw2Vm2Hr4Yu9')
     
     # Interfaz
     WINDOW_WIDTH = 1200

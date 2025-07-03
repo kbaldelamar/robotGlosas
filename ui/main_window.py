@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(client_group)
         
         # Configurar proporciones del splitter
-        main_splitter.setSizes([500, 300])
+        main_splitter.setSizes([900, 100])  # Glosas mucho más grande que clientes
         main_layout.addWidget(main_splitter)
         
         # Conectar señales
