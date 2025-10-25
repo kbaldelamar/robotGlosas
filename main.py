@@ -18,7 +18,13 @@ def main():
     # Inicializar base de datos
     db_manager = DatabaseManager()
     db_manager.create_tables()
-    logger.info("Base de datos inicializada correctamente")
+    logger.info("Base de datos principal inicializada correctamente")
+    
+    # Inicializar tablas de glosas
+    from database.db_manager_glosas import DatabaseManagerGlosas
+    db_glosas = DatabaseManagerGlosas()
+    db_glosas.create_glosas_tables()
+    logger.info("Tablas de glosas inicializadas correctamente")
     
     # Crear aplicación Qt
     app = QApplication(sys.argv)

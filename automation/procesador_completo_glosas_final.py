@@ -521,20 +521,37 @@ class ProcesadorCompletoGlosasImplementado:
             return []
 
     def _parsear_moneda(self, valor: str) -> float:
-        """Convierte texto de moneda a float (mejorado para el formato de tu tabla)."""
+        """Convierte texto de moneda a float."""
         try:
             if not valor:
                 return 0.0
-
-            # Limpiar el texto: remover símbolos y espacios
-            limpio = valor.replace('$', '').replace(',', '').replace(' ', '').strip()
-
-            if not limpio:
-                return 0.0
-
-            # Convertir directamente a float (ya viene con punto decimal correcto)
-            return float(limpio)
-
+            # Elimina el símbolo $ y espacios
+            limpio = valor.replace('$', '').replace(' ', '').strip()
+            
+            # Detectar formato basado en la posición de coma y punto
+            if ',' in limpio and '.' in limpio:
+                # Determinar cuál es el separador decimal por posición
+                pos_coma = limpio.rfind(',')
+                pos_punto = limpio.rfind('.')
+                
+                if pos_coma > pos_punto:
+                    # Formato: 1.234.567,89 (punto=miles, coma=decimal)
+                    limpio = limpio.replace('.', '').replace(',', '.')
+                else:
+                    # Formato: 1,234,567.89 (coma=miles, punto=decimal)
+                    limpio = limpio.replace(',', '')
+            # Si solo contiene comas, asumir formato: 1234,89 (coma decimal)
+            elif ',' in limpio and '.' not in limpio:
+                # Reemplazar coma decimal por punto
+                limpio = limpio.replace(',', '.')
+            # Si solo contiene puntos, verificar si es separador de miles o decimal
+            elif '.' in limpio and ',' not in limpio:
+                # Si hay múltiples puntos o el último punto está lejos del final, son separadores de miles
+                if limpio.count('.') > 1 or (len(limpio) - limpio.rfind('.')) > 3:
+                    limpio = limpio.replace('.', '')
+                # Si hay un solo punto cerca del final, es separador decimal (mantener)
+            
+            return float(limpio) if limpio else 0.0
         except Exception as e:
             self._log(f"⚠️ Error parseando moneda '{valor}': {e}", "warning")
             return 0.0

@@ -345,7 +345,7 @@ class WebScraperGlosasEnPausa:
                                fecha_radicacion, COALESCE(intentos, 0) as intentos
                         FROM cuenta_glosas_principal 
                         WHERE estado IN ('FALLIDO', 'EN_PROCESO') 
-                        AND COALESCE(intentos, 0) < 5
+                        AND COALESCE(intentos, 0) < 2
                         ORDER BY intentos ASC, created_at ASC
                     """)
                     

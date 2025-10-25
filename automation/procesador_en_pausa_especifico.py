@@ -88,6 +88,31 @@ class ProcesadorEnPausaEspecifico:
             # Preparar sistema independiente
             if not await self._preparar_sistema():
                 return 0, 0
+            
+            # ✅ VERIFICAR: Configuraciones de respuesta disponibles
+            if not self.configuraciones_respuesta:
+                self._log("🚫 NO HAY CONFIGURACIONES DE RESPUESTA DISPONIBLES", "error")
+                self._log("💡 RAZÓN: Sin configuraciones no se pueden responder glosas automáticamente")
+                
+                # Verificar si la tabla existe y tiene datos
+                try:
+                    count_configs = self.db_manager.get_configuraciones_respuesta_count()
+                    if count_configs > 0:
+                        self._log(f"� Se encontraron {count_configs} configuraciones en BD pero están inactivas")
+                        configuraciones = self.db_manager.get_configuraciones_respuesta_detalle()
+                        self._log("📝 CONFIGURACIONES DISPONIBLES:")
+                        for config in configuraciones:
+                            estado = "✅ ACTIVA" if config['activo'] else "❌ INACTIVA"
+                            self._log(f"   • {config['tipo']} - {config['justificacion_patron']} [{estado}]")
+                        self._log("🔧 SOLUCIÓN: Active las configuraciones cambiando activo=1 en la BD")
+                    else:
+                        self._log("📋 No se encontraron configuraciones en la tabla glosas_respuestas_config")
+                        self._log("🔧 SOLUCIÓN: Agregue configuraciones de respuesta a la base de datos")
+                except Exception as e:
+                    self._log(f"⚠️ Error verificando configuraciones: {e}")
+                
+                self._log("⚠️ PROCESAMIENTO CANCELADO - No se procesarán cuentas sin configuraciones")
+                return 0, 0
 
             procesadas = 0
             fallidas = 0
@@ -144,66 +169,66 @@ class ProcesadorEnPausaEspecifico:
             self._log(f"❌ Error en procesamiento EN PAUSA independiente: {e}", "error")
             return 0, 0
 
-    async def procesar_cuentas_en_pausa_especificas(self, cuentas_en_pausa: List[Dict]) -> Tuple[int, int]:
-        """REFACTORIZADO: Usar procesar_cuentas_en_pausa en lugar de lógica propia."""
-        return await self.procesar_cuentas_en_pausa(cuentas_en_pausa)
+#    async def procesar_cuentas_en_pausa_especificas(self, cuentas_en_pausa: List[Dict]) -> Tuple[int, int]:
+#        """REFACTORIZADO: Usar procesar_cuentas_en_pausa en lugar de lógica propia."""
+#        return await self.procesar_cuentas_en_pausa(cuentas_en_pausa)
 
-    def _debug_metodos_heredados(self):
-        """
-        🔍 DEBUG: Mostrar métodos disponibles de la clase padre.
-        """
-        try:
-            self._log("🔍 === DEBUGGING MÉTODOS HEREDADOS ===")
-
-            # Obtener todos los métodos disponibles
-            metodos_disponibles = []
-            for nombre in dir(self):
-                if not nombre.startswith('_') and callable(getattr(self, nombre)):
-                    metodos_disponibles.append(nombre)
-
-            # Filtrar métodos relevantes para procesamiento
-            palabras_clave = ['proces', 'glosa', 'ejecutar', 'run', 'handle', 'manage', 'completa']
-            metodos_procesamiento = []
-
-            for metodo in metodos_disponibles:
-                for palabra in palabras_clave:
-                    if palabra.lower() in metodo.lower():
-                        metodos_procesamiento.append(metodo)
-                        break
-                    
-            self._log(f"📋 Métodos de procesamiento disponibles ({len(metodos_procesamiento)}):")
-            for metodo in metodos_procesamiento:
-                self._log(f"   • {metodo}")
-
-            # Verificar métodos específicos comunes
-            metodos_comunes = [
-                'procesar_cuenta_completa',
-                'procesar_glosas_cuenta', 
-                'ejecutar_procesamiento',
-                'run_automation',
-                'process_account',
-                'handle_account',
-                '_procesar_cuenta_completa',
-                'procesar_glosas',
-                'ejecutar_glosas',
-                'manejar_glosas'
-            ]
-
-            self._log("🎯 Verificando métodos comunes:")
-            metodos_encontrados = []
-            for metodo in metodos_comunes:
-                if hasattr(self, metodo):
-                    metodos_encontrados.append(metodo)
-                    self._log(f"   ✅ {metodo} - DISPONIBLE")
-                else:
-                    self._log(f"   ❌ {metodo} - NO DISPONIBLE")
-
-            self._log(f"🔥 Métodos heredados encontrados: {metodos_encontrados}")
-            self._log("🔍 === FIN DEBUG MÉTODOS ===")
-
-        except Exception as e:
-            self._log(f"❌ Error en debug métodos: {e}", "error")
-
+#    def _debug_metodos_heredados(self):
+#        """
+#        🔍 DEBUG: Mostrar métodos disponibles de la clase padre.
+#        """
+#        try:
+#            self._log("🔍 === DEBUGGING MÉTODOS HEREDADOS ===")
+#
+#            # Obtener todos los métodos disponibles
+#            metodos_disponibles = []
+#            for nombre in dir(self):
+#                if not nombre.startswith('_') and callable(getattr(self, nombre)):
+#                    metodos_disponibles.append(nombre)
+#
+#            # Filtrar métodos relevantes para procesamiento
+#            palabras_clave = ['proces', 'glosa', 'ejecutar', 'run', 'handle', 'manage', 'completa']
+#            metodos_procesamiento = []
+#
+#            for metodo in metodos_disponibles:
+#                for palabra in palabras_clave:
+#                    if palabra.lower() in metodo.lower():
+#                        metodos_procesamiento.append(metodo)
+#                        break
+#                    
+#            self._log(f"📋 Métodos de procesamiento disponibles ({len(metodos_procesamiento)}):")
+#            for metodo in metodos_procesamiento:
+#                self._log(f"   • {metodo}")
+#
+#            # Verificar métodos específicos comunes
+#            metodos_comunes = [
+#                'procesar_cuenta_completa',
+#                'procesar_glosas_cuenta', 
+#                'ejecutar_procesamiento',
+#                'run_automation',
+#                'process_account',
+#                'handle_account',
+#                '_procesar_cuenta_completa',
+#                'procesar_glosas',
+#                'ejecutar_glosas',
+#                'manejar_glosas'
+#            ]
+#
+#            self._log("🎯 Verificando métodos comunes:")
+#            metodos_encontrados = []
+#            for metodo in metodos_comunes:
+#                if hasattr(self, metodo):
+#                    metodos_encontrados.append(metodo)
+#                    self._log(f"   ✅ {metodo} - DISPONIBLE")
+#                else:
+#                    self._log(f"   ❌ {metodo} - NO DISPONIBLE")
+#
+#            self._log(f"🔥 Métodos heredados encontrados: {metodos_encontrados}")
+#            self._log("🔍 === FIN DEBUG MÉTODOS ===")
+#
+#        except Exception as e:
+#            self._log(f"❌ Error en debug métodos: {e}", "error")
+#
     
     
     async def _hacer_clic_cuenta_en_pausa(self, idcuenta: str) -> bool:
@@ -315,7 +340,6 @@ class ProcesadorEnPausaEspecifico:
         self._log("📋 Extrayendo datos de filas de la tabla EN PAUSA")
         cuentas = []
         try:
-            # Ajusta el selector al de la tabla EN PAUSA
             filas = self.page.locator(self.selectores['filas_tabla_principal'])
             total_filas = await filas.count()
             self._log(f"🔎 Total filas encontradas en EN PAUSA: {total_filas}")
@@ -323,24 +347,29 @@ class ProcesadorEnPausaEspecifico:
             for i in range(total_filas):
                 fila = filas.nth(i)
                 celdas = fila.locator("td")
-                if await celdas.count() < 5:
+                if await celdas.count() < 8:
                     continue  # Salta filas incompletas
 
-                # Ajusta los índices según el orden de columnas de la tabla EN PAUSA
                 idcuenta = (await celdas.nth(0).text_content() or "").strip()
-                proveedor = (await celdas.nth(1).text_content() or "").strip()
-                estado = (await celdas.nth(2).text_content() or "").strip()
-                valor_glosado = (await celdas.nth(3).text_content() or "").strip()
-                fecha_radicacion = (await celdas.nth(4).text_content() or "").strip()
-                # Agrega más campos si tu tabla tiene más columnas relevantes
+                numero_radicacion = (await celdas.nth(1).text_content() or "").strip()
+                fecha_radicacion = (await celdas.nth(2).text_content() or "").strip()
+                proveedor = (await celdas.nth(3).text_content() or "").strip()
+                numero_factura = (await celdas.nth(4).text_content() or "").strip()
+                fecha_factura = (await celdas.nth(5).text_content() or "").strip()
+                valor_factura = (await celdas.nth(6).text_content() or "").strip()
+                valor_glosado = (await celdas.nth(7).text_content() or "").strip()
 
                 cuentas.append({
                     "idcuenta": idcuenta,
-                    "proveedor": proveedor,
-                    "estado": estado,
-                    "valor_glosado": valor_glosado,
+                    "numero_radicacion": numero_radicacion,
                     "fecha_radicacion": fecha_radicacion,
-                    # ...otros campos si es necesario...
+                    "proveedor": proveedor,
+                    "numero_factura": numero_factura,
+                    "fecha_factura": fecha_factura,
+                    "valor_factura": self._parsear_moneda(valor_factura),
+                    "valor_glosado": self._parsear_moneda(valor_glosado),
+                    "estado": "FALLIDO",  # Estado inicial
+                    "intentos": 0
                 })
             self._log(f"✅ Extracción completada. Total cuentas: {len(cuentas)}")
         except Exception as e:
@@ -364,13 +393,15 @@ class ProcesadorEnPausaEspecifico:
                         # ✅ USAR el método correcto del db_manager
                         cuenta_data = {
                             'idcuenta': cuenta['idcuenta'],
-                            'proveedor': cuenta['proveedor'],
-                            'valor_glosado': self._parsear_moneda(cuenta['valor_glosado']),
+                            'numero_radicacion': cuenta['numero_radicacion'],
                             'fecha_radicacion': cuenta['fecha_radicacion'],
-                            'numero_radicacion': '',  # Completar si tienes este dato
-                            'numero_factura': '',     # Completar si tienes este dato  
-                            'fecha_factura': '',      # Completar si tienes este dato
-                            'valor_factura': 0.0      # Completar si tienes este dato
+                            'proveedor': cuenta['proveedor'],
+                            'numero_factura': cuenta['numero_factura'],
+                            'fecha_factura': cuenta['fecha_factura'],
+                            'fecha_factura': self._parsear_moneda(cuenta['valor_factura']),
+                            'valor_glosado': self._parsear_moneda(cuenta['valor_glosado']),
+                            'estado': cuenta.get('estado', 'FALLIDO'),
+                            'intentos': cuenta.get('intentos', 0)
                         }
 
                         cuenta_bd_id = self.db_manager.create_or_update_cuenta(cuenta_data)
@@ -378,6 +409,7 @@ class ProcesadorEnPausaEspecifico:
 
                         if cuentas_guardadas <= 5:  # Log solo primeras 5
                             self._log(f"✅ Cuenta {cuenta['idcuenta']} guardada como PENDIENTE - ID: {cuenta_bd_id}")
+                            self._log(f"🟢 Guardando cuenta en BD desde procesar_y_guardar_cuentas: {cuenta_data}")
 
                     else:
                         self._log(f"⏭️ Cuenta {cuenta['idcuenta']} saltada (ya procesada o en proceso)")
@@ -395,58 +427,58 @@ class ProcesadorEnPausaEspecifico:
 
         except Exception as e:
             self._log(f"❌ Error guardando cuentas en base de datos: {e}", "error")
-    async def ejecutar(self):
-        """
-        ✅ FUNCIONALIDAD RECUPERADA: BD primero, luego importar tabla si es necesario.
-        1. Busca cuentas pendientes en BD
-        2. Si no hay nada en BD, importa desde tabla web
-        3. Procesa lo que encuentra/importa
-        """
-        self._log("▶️ Iniciando procesamiento de cuentas EN PAUSA (BD PRIMERO)")
-        try:
-            # ✅ PASO 1: Buscar primero en BD
-            self._log("🔍 Buscando cuentas pendientes en BD...")
-            cuentas_pendientes_bd = await self._obtener_cuentas_en_pausa()
-
-            if cuentas_pendientes_bd:
-                # ✅ HAY CUENTAS EN BD: Procesar directamente
-                self._log(f"📋 Encontradas {len(cuentas_pendientes_bd)} cuentas pendientes en BD")
-                self._log("🚀 Procesando cuentas existentes en BD...")
-
-                procesadas, fallidas = await self.procesar_cuentas_en_pausa(cuentas_pendientes_bd)
-                self._log(f"✅ Procesamiento BD completado - Procesadas: {procesadas}, Fallidas: {fallidas}")
-
-            else:
-                # ✅ NO HAY CUENTAS EN BD: Importar desde tabla web
-                self._log("⚠️ No hay cuentas pendientes en BD")
-                self._log("📥 Importando cuentas desde tabla web EN PAUSA...")
-
-                # Extraer de la tabla web
-                cuentas_en_tabla = await self.extraer_datos_filas_tabla()
-
-                if cuentas_en_tabla:
-                    self._log(f"📋 Encontradas {len(cuentas_en_tabla)} cuentas en tabla web")
-
-                    # Guardar en BD como PENDIENTE
-                    await self.procesar_y_guardar_cuentas(cuentas_en_tabla)
-                    self._log("💾 Cuentas guardadas en BD")
-
-                    # Buscar las recién importadas
-                    cuentas_recien_importadas = await self._obtener_cuentas_en_pausa()
-
-                    if cuentas_recien_importadas:
-                        self._log(f"🚀 Procesando {len(cuentas_recien_importadas)} cuentas recién importadas...")
-                        procesadas, fallidas = await self.procesar_cuentas_en_pausa(cuentas_recien_importadas)
-                        self._log(f"✅ Procesamiento importación completado - Procesadas: {procesadas}, Fallidas: {fallidas}")
-                    else:
-                        self._log("❌ Error: No se pudieron recuperar cuentas después de importar", "error")
-                else:
-                    self._log("⚠️ No hay cuentas en tabla web para importar")
-
-            self._log("✅ Proceso de cuentas EN PAUSA completado")
-
-        except Exception as e:
-            self._log(f"❌ Error en el proceso de cuentas EN PAUSA: {e}", "error")
+#    async def ejecutar(self):
+#        """
+#        ✅ FUNCIONALIDAD RECUPERADA: BD primero, luego importar tabla si es necesario.
+#        1. Busca cuentas pendientes en BD
+#        2. Si no hay nada en BD, importa desde tabla web
+#        3. Procesa lo que encuentra/importa
+#        """
+#        self._log("▶️ Iniciando procesamiento de cuentas EN PAUSA (BD PRIMERO)")
+#        try:
+#            # ✅ PASO 1: Buscar primero en BD
+#            self._log("🔍 Buscando cuentas pendientes en BD...")
+#            cuentas_pendientes_bd = await self._obtener_cuentas_en_pausa()
+#
+#            if cuentas_pendientes_bd:
+#                # ✅ HAY CUENTAS EN BD: Procesar directamente
+#                self._log(f"📋 Encontradas {len(cuentas_pendientes_bd)} cuentas pendientes en BD")
+#                self._log("🚀 Procesando cuentas existentes en BD...")
+#
+#                procesadas, fallidas = await self.procesar_cuentas_en_pausa(cuentas_pendientes_bd)
+#                self._log(f"✅ Procesamiento BD completado - Procesadas: {procesadas}, Fallidas: {fallidas}")
+#
+#            else:
+#                # ✅ NO HAY CUENTAS EN BD: Importar desde tabla web
+#                self._log("⚠️ No hay cuentas pendientes en BD")
+#                self._log("📥 Importando cuentas desde tabla web EN PAUSA...")
+#
+#                # Extraer de la tabla web
+#                cuentas_en_tabla = await self.extraer_datos_filas_tabla()
+#
+#                if cuentas_en_tabla:
+#                    self._log(f"📋 Encontradas {len(cuentas_en_tabla)} cuentas en tabla web")
+#
+#                    # Guardar en BD como PENDIENTE
+#                    await self.procesar_y_guardar_cuentas(cuentas_en_tabla)
+#                    self._log("💾 Cuentas guardadas en BD")
+#
+#                    # Buscar las recién importadas
+#                    cuentas_recien_importadas = await self._obtener_cuentas_en_pausa()
+#
+#                    if cuentas_recien_importadas:
+#                        self._log(f"🚀 Procesando {len(cuentas_recien_importadas)} cuentas recién importadas...")
+#                        procesadas, fallidas = await self.procesar_cuentas_en_pausa(cuentas_recien_importadas)
+#                        self._log(f"✅ Procesamiento importación completado - Procesadas: {procesadas}, Fallidas: {fallidas}")
+#                    else:
+#                        self._log("❌ Error: No se pudieron recuperar cuentas después de importar", "error")
+#                else:
+#                    self._log("⚠️ No hay cuentas en tabla web para importar")
+#
+#            self._log("✅ Proceso de cuentas EN PAUSA completado")
+#
+#        except Exception as e:
+#            self._log(f"❌ Error en el proceso de cuentas EN PAUSA: {e}", "error")
     async def verificar_estado_sistema(self):
         """
         🔍 DIAGNÓSTICO: Verifica el estado actual de BD y tabla web.
@@ -584,6 +616,13 @@ class ProcesadorEnPausaEspecifico:
                     }
                 
                 self._log(f"✅ Cargadas {len(self.configuraciones_respuesta)} configuraciones")
+                
+                # Mostrar configuraciones cargadas
+                if self.configuraciones_respuesta:
+                    self._log("📝 CONFIGURACIONES ACTIVAS CARGADAS:")
+                    for key, config in self.configuraciones_respuesta.items():
+                        pdf_info = f"[PDF: {config['pdf_path']}]" if config['pdf_path'] else "[Sin PDF]"
+                        self._log(f"   • {config['tipo']} - {config['patron']} {pdf_info}")
                 
         except Exception as e:
             self._log(f"⚠️ Error cargando configuraciones: {e}", "warning")
@@ -1152,11 +1191,11 @@ class ProcesadorEnPausaEspecifico:
                 """, (cuenta_id, glosa_info.get('id_glosa', '')))
 
                 if cursor.fetchone():
-                    # Actualizar
+                    # Actualizar usando fecha_procesamiento
                     conn.execute("""
                         UPDATE glosa_items_detalle 
                         SET tipo = ?, justificacion = ?, valor_glosado = ?, 
-                            estado_original = ?, updated_at = CURRENT_TIMESTAMP
+                            estado_original = ?, fecha_procesamiento = CURRENT_TIMESTAMP
                         WHERE cuenta_principal_id = ? AND id_glosa = ?
                     """, (
                         glosa_info.get('tipo', ''),
@@ -1167,7 +1206,7 @@ class ProcesadorEnPausaEspecifico:
                         glosa_info['id_glosa']
                     ))
                 else:
-                    # Insertar nueva
+                    # Insertar nueva (esto está bien)
                     conn.execute("""
                         INSERT INTO glosa_items_detalle 
                         (cuenta_principal_id, id_glosa, tipo, justificacion, valor_glosado, 
@@ -1193,7 +1232,32 @@ class ProcesadorEnPausaEspecifico:
         try:
             if not valor:
                 return 0.0
-            limpio = valor.replace('$', '').replace(',', '').replace(' ', '').strip()
+            # Elimina el símbolo $ y espacios
+            limpio = valor.replace('$', '').replace(' ', '').strip()
+            
+            # Detectar formato basado en la posición de coma y punto
+            if ',' in limpio and '.' in limpio:
+                # Determinar cuál es el separador decimal por posición
+                pos_coma = limpio.rfind(',')
+                pos_punto = limpio.rfind('.')
+                
+                if pos_coma > pos_punto:
+                    # Formato: 1.234.567,89 (punto=miles, coma=decimal)
+                    limpio = limpio.replace('.', '').replace(',', '.')
+                else:
+                    # Formato: 1,234,567.89 (coma=miles, punto=decimal)
+                    limpio = limpio.replace(',', '')
+            # Si solo contiene comas, asumir formato: 1234,89 (coma decimal)
+            elif ',' in limpio and '.' not in limpio:
+                # Reemplazar coma decimal por punto
+                limpio = limpio.replace(',', '.')
+            # Si solo contiene puntos, verificar si es separador de miles o decimal
+            elif '.' in limpio and ',' not in limpio:
+                # Si hay múltiples puntos o el último punto está lejos del final, son separadores de miles
+                if limpio.count('.') > 1 or (len(limpio) - limpio.rfind('.')) > 3:
+                    limpio = limpio.replace('.', '')
+                # Si hay un solo punto cerca del final, es separador decimal (mantener)
+            
             return float(limpio) if limpio else 0.0
         except Exception as e:
             self._log(f"⚠️ Error parseando moneda '{valor}': {e}", "warning")
@@ -1298,7 +1362,7 @@ class ProcesadorEnPausaEspecifico:
                            COALESCE(intentos, 0) as intentos
                     FROM cuenta_glosas_principal 
                     WHERE estado IN ('PENDIENTE', 'FALLIDO') 
-                    AND COALESCE(intentos, 0) < 5
+                    AND COALESCE(intentos, 0) < 2
                     ORDER BY created_at ASC
                 """)
 

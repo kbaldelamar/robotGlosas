@@ -11,6 +11,7 @@ from database.db_manager import DatabaseManager
 # *** NUEVO: Importar gestor de base de datos de glosas ***
 from database.db_manager_glosas import DatabaseManagerGlosas
 from ui.glosas_en_pausa_widget import GlosasEnPausaWidget
+from ui.pdf_separator_widget import PDFSeparatorWidget
 from database.models import Cliente
 from config.settings import Settings
 
@@ -68,6 +69,10 @@ class MainWindow(QMainWindow):
         
         self.glosas_en_pausa_widget = GlosasEnPausaWidget()
         self.stacked_widget.addWidget(self.glosas_en_pausa_widget)
+        
+        # Widget de separador de PDF
+        self.pdf_separator_widget = PDFSeparatorWidget()
+        self.stacked_widget.addWidget(self.pdf_separator_widget)
         
         # Widget de placeholder para reportes (futuro)
         self.reports_widget = self.create_placeholder_widget("Módulo de Reportes")
@@ -160,6 +165,13 @@ class MainWindow(QMainWindow):
         en_pausa_action.triggered.connect(lambda: self.switch_to_view(1))
         modules_menu.addAction(en_pausa_action)
         
+        # Separador de PDF
+        pdf_separator_action = QAction('📄 Separador de PDF', self)
+        pdf_separator_action.setShortcut(QKeySequence('Ctrl+S'))
+        pdf_separator_action.setStatusTip('Dividir PDF en páginas individuales con OCR')
+        pdf_separator_action.triggered.connect(lambda: self.switch_to_view(2))
+        modules_menu.addAction(pdf_separator_action)
+        
         # Separador
         modules_menu.addSeparator()
         
@@ -167,7 +179,7 @@ class MainWindow(QMainWindow):
         reports_action = QAction('Reportes', self)
         reports_action.setShortcut(QKeySequence('Ctrl+R'))
         reports_action.setStatusTip('Abrir módulo de reportes')
-        reports_action.triggered.connect(lambda: self.switch_to_view(1))
+        reports_action.triggered.connect(lambda: self.switch_to_view(3))
         reports_action.setEnabled(True)  # Habilitado para mostrar placeholder
         modules_menu.addAction(reports_action)
         
@@ -314,7 +326,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         
         # *** INDICAR QUE ES LA VERSIÓN MEJORADA ***
-        self.status_bar.showMessage("BootGestor v2.0 - Módulo: Gestión de Glosas (Mejorado)")
+        self.status_bar.showMessage("BootGestor v2.2 - Módulo: Gestión de Glosas (Mejorado con Separador PDF)")
         
         # Timer para actualizar estado periódicamente
         self.status_timer = QTimer()
@@ -339,14 +351,15 @@ class MainWindow(QMainWindow):
         view_names = {
             0: "Gestión de Glosas",
             1: "🔄 Glosas en Pausa",  # NUEVO
-            2: "Reportes",
-            3: "Configuración"
+            2: "📄 Separador de PDF",  # NUEVO
+            3: "Reportes",
+            4: "Configuración"
         }
 
         view_name = view_names.get(index, "Desconocido")
 
         if hasattr(self, 'status_bar') and self.status_bar:
-            self.status_bar.showMessage(f"BootGestor v2.1 - Módulo: {view_name}")
+            self.status_bar.showMessage(f"BootGestor v2.2 - Módulo: {view_name}")
 
         self.logger.info(f"Cambiado a módulo: {view_name}")
     def refresh_en_pausa_data(self):
@@ -560,33 +573,36 @@ class MainWindow(QMainWindow):
             self,
             "Acerca de BootGestor",
             """
-            <h3>BootGestor v2.1 (Con Glosas en Pausa)</h3>
+            <h3>BootGestor v2.2 (Con Separador de PDF)</h3>
             <p>Sistema de automatización para gestión de glosas</p>
             
             <h4>Módulos Disponibles:</h4>
             <ul>
             <li>✅ Gestión de Glosas (Procesamiento principal)</li>
-            <li>✅ 🔄 Glosas en Pausa (Reprocesamiento) - <b>NUEVO</b></li>
+            <li>✅ 🔄 Glosas en Pausa (Reprocesamiento)</li>
+            <li>✅ 📄 Separador de PDF (División con OCR) - <b>NUEVO</b></li>
             <li>🚧 Reportes (En desarrollo)</li>
             </ul>
             
-            <h4>Nuevas Funcionalidades v2.1:</h4>
+            <h4>Nuevas Funcionalidades v2.2:</h4>
             <ul>
-            <li>✅ <b>Módulo Glosas en Pausa independiente</b></li>
-            <li>✅ Navegación específica a sección "En Pausa"</li>
-            <li>✅ Control de reintentos automático (máximo 5)</li>
-            <li>✅ Filtrado específico de cuentas fallidas</li>
-            <li>✅ Estadísticas de recuperación en tiempo real</li>
-            <li>✅ Arquitectura completamente separada</li>
+            <li>✅ <b>Módulo Separador de PDF completo</b></li>
+            <li>✅ División automática de PDF página por página</li>
+            <li>✅ OCR integrado para identificar números de documento</li>
+            <li>✅ Nomenclatura automática de archivos</li>
+            <li>✅ Progreso en tiempo real y logs detallados</li>
+            <li>✅ Configuración de rangos de páginas</li>
+            <li>✅ Manejo de errores robusto</li>
             </ul>
             
-            <h4>Características Técnicas:</h4>
+            <h4>Características Técnicas Separador PDF:</h4>
             <ul>
-            <li>✅ Reutilización inteligente de componentes</li>
-            <li>✅ Base de datos con control de intentos</li>
-            <li>✅ Signals para actualización en tiempo real</li>
-            <li>✅ Separación completa de lógicas</li>
-            <li>✅ Navegación específica por módulo</li>
+            <li>✅ PyPDF2 para división de páginas</li>
+            <li>✅ Tesseract OCR para reconocimiento de texto</li>
+            <li>✅ PyMuPDF para conversión a imagen</li>
+            <li>✅ Expresiones regulares para identificar documentos</li>
+            <li>✅ Procesamiento en hilo separado (no bloquea UI)</li>
+            <li>✅ Configuración flexible de parámetros</li>
             </ul>
             
             <h4>Desarrollado con:</h4>
@@ -595,6 +611,7 @@ class MainWindow(QMainWindow):
             <li>PySide6</li>
             <li>Playwright</li>
             <li>SQLite</li>
+            <li>PyPDF2 / Tesseract OCR</li>
             </ul>
             
             <p>© 2025 - Todos los derechos reservados</p>

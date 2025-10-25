@@ -45,7 +45,7 @@ def verificar_sistema():
     return True
 
 def instalar_navegador_playwright():
-    """Instala el navegador Chromium para incluirlo en el ejecutable."""
+    """Instala el navegador Chromium para incluirlo en el ejecutable.      fdfd fd """
     print("🎭 Instalando navegador Chromium...")
     
     try:

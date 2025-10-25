@@ -5,3 +5,12 @@ playwright==1.40.0
 # Dependencias adicionales para manejo de datos (opcionales)
 pandas==2.1.4
 openpyxl==3.1.2
+
+# *** NUEVO: Dependencias para Separador de PDF ***
+PyPDF2==3.0.1
+pytesseract==0.3.10
+Pillow==10.1.0
+PyMuPDF==1.23.14
+
+# Dependencias para descarga de archivos
+urllib3>=1.26.0

@@ -74,6 +74,22 @@ class DatabaseManagerGlosas(DatabaseManager):
                     )
                 """)
                 
+                # Tabla de configuraciones de respuesta automática
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS glosas_respuestas_config (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tipo VARCHAR(100) NOT NULL,
+                        justificacion_patron VARCHAR(500) NOT NULL,
+                        respuesta_automatica TEXT NOT NULL,
+                        url_pdf VARCHAR(500),
+                        activo BOOLEAN DEFAULT 1,
+                        fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        
+                        UNIQUE(tipo, justificacion_patron)
+                    )
+                """)
+                
                 # Índices para optimizar consultas
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_cuenta_idcuenta 
@@ -90,6 +106,14 @@ class DatabaseManagerGlosas(DatabaseManager):
                     ON glosa_items_detalle(id_glosa)
                 """)
                 
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_config_respuestas 
+                    ON glosas_respuestas_config(tipo, justificacion_patron)
+                """)
+                
+                # ✅ TABLA CREADA SIN CONFIGURACIONES BASE
+                # Cada cliente debe crear sus propias configuraciones personalizadas
+                    
                 conn.commit()
                 self.logger.info("Tablas de glosas creadas correctamente")
                 
@@ -168,7 +192,8 @@ class DatabaseManagerGlosas(DatabaseManager):
     # EN LA CLASE DatabaseManagerGlosas (database/db_manager_glosas.py)
     # REEMPLAZAR EL MÉTODO create_or_update_cuenta POR ESTE:
     
-    def create_or_update_cuenta(self, cuenta_data: dict) -> int:
+    def create_or_update_cuenta(self, cuenta_data: dict):
+        self.logger.info(f"[DatabaseManagerGlosas.create_or_update_cuenta] Insertando/actualizando cuenta: {cuenta_data}")
         """
         Crea o actualiza una cuenta en la base de datos.
         MODIFICADO: Ahora crea/actualiza como PENDIENTE en lugar de EN_PROCESO
@@ -370,23 +395,193 @@ class DatabaseManagerGlosas(DatabaseManager):
             self.logger.error(f"Error obteniendo cuentas pendientes: {e}")
             return []
     
+    def get_configuraciones_respuesta_count(self) -> int:
+        """
+        Obtiene el número de configuraciones de respuesta activas.
+        
+        Returns:
+            int: Número de configuraciones activas
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM glosas_respuestas_config WHERE activo = 1
+                """)
+                count = cursor.fetchone()[0]
+                self.logger.info(f"Configuraciones de respuesta activas: {count}")
+                return count
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Error obteniendo configuraciones de respuesta: {e}")
+            return 0
+    
+    def get_configuraciones_respuesta_detalle(self) -> List[Dict]:
+        """
+        Obtiene detalles de todas las configuraciones de respuesta.
+        
+        Returns:
+            List[Dict]: Lista de configuraciones con todos sus campos
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT tipo, justificacion_patron, respuesta_automatica, url_pdf, activo
+                    FROM glosas_respuestas_config 
+                    ORDER BY tipo, justificacion_patron
+                """)
+                
+                configuraciones = []
+                for row in cursor.fetchall():
+                    configuraciones.append({
+                        'tipo': row['tipo'],
+                        'justificacion_patron': row['justificacion_patron'],
+                        'respuesta_automatica': row['respuesta_automatica'],
+                        'url_pdf': row['url_pdf'],
+                        'activo': row['activo']
+                    })
+                
+                self.logger.info(f"Obtenidas {len(configuraciones)} configuraciones de respuesta")
+                return configuraciones
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Error obteniendo detalle de configuraciones: {e}")
+            return []
+            
     def crear_cuenta_glosa_pausa(self, idcuenta, proveedor, valor_glosado, fecha_radicacion, **kwargs):
         print(f"⚠️ [DEBUG] crear_cuenta_glosa_pausa llamado para idcuenta={idcuenta}")  # <-- Depuración
         self.logger.info(f"⚠️ [DEBUG] creando cuenta EN PAUSA {idcuenta} como FALLIDO")
        
         """
         Crea una cuenta glosa para EN PAUSA con estado FALLIDO por defecto.
+        ✅ CORREGIDO: Incluye TODOS los campos disponibles.
         """
+        # Extraer campos adicionales de kwargs
+        numero_radicacion = kwargs.get('numero_radicacion', '')
+        numero_factura = kwargs.get('numero_factura', '')
+        fecha_factura = kwargs.get('fecha_factura', '')
+        valor_factura = kwargs.get('valor_factura', 0.0)
+        motivo_fallo = kwargs.get('motivo_fallo', 'Cuenta importada desde EN PAUSA para reprocesamiento')
+        
         with self.get_connection() as conn:
             conn.execute("""
                 INSERT INTO cuenta_glosas_principal 
-                (idcuenta, proveedor, estado, valor_glosado, fecha_radicacion)
-                VALUES (?, ?, ?, ?, ?)
+                (idcuenta, numero_radicacion, fecha_radicacion, proveedor, 
+                 numero_factura, fecha_factura, valor_factura, valor_glosado, 
+                 estado, motivo_fallo, intentos, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 idcuenta,
+                numero_radicacion,
+                fecha_radicacion,
                 proveedor,
-                "FALLIDO",  # Estado fijo para EN PAUSA
+                numero_factura,
+                fecha_factura,
+                valor_factura,
                 valor_glosado,
-                fecha_radicacion
+                "FALLIDO",  # Estado fijo para EN PAUSA
+                motivo_fallo,
+                0  # intentos inicial en 0
             ))
             conn.commit()
+    
+    def obtener_justificaciones_sin_configuracion(self) -> List[Dict]:
+        """
+        Obtiene las justificaciones de glosas que están marcadas como SIN_CONFIGURACION,
+        agrupadas por tipo y justificación con su frecuencia.
+        
+        Returns:
+            List[Dict]: Lista con tipo, justificación y cantidad de occurrencias
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT 
+                        tipo,
+                        justificacion,
+                        COUNT(*) as cantidad,
+                        MIN(created_at) as primera_ocurrencia,
+                        MAX(created_at) as ultima_ocurrencia
+                    FROM glosa_items_detalle 
+                    WHERE error_procesamiento = 'SIN_CONFIGURACION'
+                        AND tipo IS NOT NULL 
+                        AND justificacion IS NOT NULL
+                        AND justificacion != ''
+                    GROUP BY tipo, justificacion
+                    ORDER BY cantidad DESC, tipo, justificacion
+                """)
+                
+                justificaciones = []
+                for row in cursor.fetchall():
+                    justificaciones.append({
+                        'tipo': row[0],
+                        'justificacion': row[1],
+                        'cantidad': row[2],
+                        'primera_ocurrencia': row[3],
+                        'ultima_ocurrencia': row[4]
+                    })
+                
+                return justificaciones
+                
+        except Exception as e:
+            self.logger.error(f"Error obteniendo justificaciones sin configuración: {e}")
+            return []
+
+    def obtener_estadisticas_configuraciones(self) -> Dict:
+        """
+        Obtiene estadísticas sobre configuraciones y glosas sin configurar.
+        
+        Returns:
+            Dict: Estadísticas de configuraciones
+        """
+        try:
+            with self.get_connection() as conn:
+                # Total de glosas procesadas
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM glosa_items_detalle 
+                    WHERE fue_procesado = TRUE
+                """)
+                total_procesadas = cursor.fetchone()[0]
+                
+                # Glosas sin configuración
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM glosa_items_detalle 
+                    WHERE error_procesamiento = 'SIN_CONFIGURACION'
+                """)
+                sin_configuracion = cursor.fetchone()[0]
+                
+                # Glosas con configuración exitosa
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM glosa_items_detalle 
+                    WHERE fue_procesado = TRUE 
+                        AND error_procesamiento IS NULL
+                """)
+                con_configuracion = cursor.fetchone()[0]
+                
+                # Tipos de glosas sin configuración
+                cursor = conn.execute("""
+                    SELECT tipo, COUNT(*) as cantidad
+                    FROM glosa_items_detalle 
+                    WHERE error_procesamiento = 'SIN_CONFIGURACION'
+                        AND tipo IS NOT NULL
+                    GROUP BY tipo
+                    ORDER BY cantidad DESC
+                """)
+                tipos_sin_config = [{'tipo': row[0], 'cantidad': row[1]} for row in cursor.fetchall()]
+                
+                return {
+                    'total_procesadas': total_procesadas,
+                    'sin_configuracion': sin_configuracion,
+                    'con_configuracion': con_configuracion,
+                    'porcentaje_sin_config': (sin_configuracion / max(total_procesadas, 1)) * 100,
+                    'tipos_sin_config': tipos_sin_config
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error obteniendo estadísticas de configuraciones: {e}")
+            return {
+                'total_procesadas': 0,
+                'sin_configuracion': 0,
+                'con_configuracion': 0,
+                'porcentaje_sin_config': 0,
+                'tipos_sin_config': []
+            }

@@ -29,6 +29,7 @@ class GlosasEnPausaAutomationWorker(QThread):
     data_imported = pyqtSignal(int)
     cuenta_processed = pyqtSignal(str, str)
     tabla_refresh_needed = pyqtSignal()
+    mensaje_usuario = pyqtSignal(str)
     
     def __init__(self, username: str, password: str):
         super().__init__()
@@ -71,6 +72,10 @@ class GlosasEnPausaAutomationWorker(QThread):
     def emit_tabla_refresh(self):
         """Emite signal para refrescar tabla."""
         self.tabla_refresh_needed.emit()
+    
+    def emit_mensaje_usuario(self, mensaje: str):
+        """Emite mensaje informativo al usuario."""
+        self.mensaje_usuario.emit(mensaje)
 
 class GlosasEnPausaStatsTable(QTableWidget):
     """
@@ -148,11 +153,19 @@ class GlosasEnPausaStatsTable(QTableWidget):
                     self.setItem(row_idx, 4, QTableWidgetItem(str(row['glosas_procesadas'])))
                     self.setItem(row_idx, 5, QTableWidgetItem(row['fecha_inicio'] or ''))
                     
-                    # Colorear intentos según cantidad
+                    # ✅ CORRECCIÓN: Colorear intentos según cantidad SIN setStyleSheet()
                     intentos_item = QTableWidgetItem(str(row['intentos']))
                     if row['intentos'] >= 5:
+                        # ✅ USAR setBackground() y setForeground() en lugar de setStyleSheet()
                         intentos_item.setBackground(Qt.GlobalColor.darkRed)
-                        intentos_item.setStyleSheet("color: white; font-weight: bold;")
+                        intentos_item.setForeground(Qt.GlobalColor.white)  # Color del texto
+                        
+                        # ✅ USAR setFont() para hacer el texto bold
+                        from PySide6.QtGui import QFont
+                        bold_font = QFont()
+                        bold_font.setBold(True)
+                        intentos_item.setFont(bold_font)
+                        
                     elif row['intentos'] >= 3:
                         intentos_item.setBackground(Qt.GlobalColor.yellow)
                     
@@ -161,7 +174,7 @@ class GlosasEnPausaStatsTable(QTableWidget):
                     
         except Exception as e:
             logging.getLogger(__name__).error(f"Error cargando datos de tabla EN PAUSA: {e}")
-
+    
 class GlosasEnPausaWidget(QWidget):
     """
     Widget para gestión de glosas EN PAUSA (FALLIDAS y EN_PROCESO).
@@ -394,6 +407,10 @@ class GlosasEnPausaWidget(QWidget):
             )
             return
         
+        # ✅ VERIFICAR: Configuraciones de respuesta automática
+        if not self._verificar_configuraciones_respuesta():
+            return  # Cancelar si no hay configuraciones
+        
         self.logger.info("🔄 Iniciando reprocesamiento EN PAUSA")
         
         # Actualizar estado de la UI
@@ -412,6 +429,7 @@ class GlosasEnPausaWidget(QWidget):
         self.automation_worker.data_imported.connect(self.on_data_imported)
         self.automation_worker.cuenta_processed.connect(self.on_cuenta_processed)
         self.automation_worker.tabla_refresh_needed.connect(self.on_tabla_refresh_needed)
+        self.automation_worker.mensaje_usuario.connect(self.on_mensaje_usuario)
         
         self.automation_worker.start()
         
@@ -442,10 +460,21 @@ class GlosasEnPausaWidget(QWidget):
         self.status_label.setText(f"🔄 Reprocesando... (✅{total_recuperadas} recuperadas, ⏳{total_en_pausa} EN PAUSA)")
     
     def on_tabla_refresh_needed(self):
-        """Se ejecuta cuando necesita refrescar toda la interfaz."""
+        """Se ejecuta cuando se necesita refrescar la tabla."""
         self.logger.info("📊 Signal recibido: Refrescando interfaz EN PAUSA completa")
         self.stats_table.load_data()
         self.update_stats()
+    
+    def on_mensaje_usuario(self, mensaje: str):
+        """Muestra mensaje informativo al usuario."""
+        from PySide6.QtWidgets import QMessageBox
+        msgBox = QMessageBox()
+        msgBox.setIcon(QMessageBox.Information)
+        msgBox.setWindowTitle("Información - Reprocesamiento EN PAUSA")
+        msgBox.setText(mensaje)
+        msgBox.setDetailedText("Para más detalles, revise los logs de la aplicación.")
+        msgBox.exec()
+        self.logger.info(f"💬 Mensaje mostrado al usuario: {mensaje}")
         
     def stop_automation(self):
         """Detiene el proceso de automatización."""
@@ -556,3 +585,144 @@ class GlosasEnPausaWidget(QWidget):
                 return result['count'] if result else 0
         except Exception:
             return 0
+    
+    def _verificar_configuraciones_respuesta(self) -> bool:
+        """
+        Verifica si existen configuraciones de respuesta automática activas.
+        
+        Returns:
+            bool: True si existen configuraciones, False si no hay configuraciones
+        """
+        try:
+            db_manager = DatabaseManagerGlosas()
+            
+            # Obtener configuraciones activas
+            count_activas = db_manager.get_configuraciones_respuesta_count()
+            
+            if count_activas > 0:
+                self.logger.info(f"✅ Se encontraron {count_activas} configuraciones de respuesta activas")
+                return True
+            
+            # No hay configuraciones activas - verificar si existen pero están inactivas
+            configuraciones_detalle = db_manager.get_configuraciones_respuesta_detalle()
+            total_configs = len(configuraciones_detalle)
+            
+            if total_configs > 0:
+                # Hay configuraciones pero están inactivas
+                self._mostrar_modal_configuraciones_inactivas(configuraciones_detalle)
+            else:
+                # No hay configuraciones en absoluto
+                self._mostrar_modal_sin_configuraciones()
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error verificando configuraciones: {e}")
+            QMessageBox.critical(
+                self,
+                "Error de Sistema",
+                f"Error verificando configuraciones de respuesta:\n{e}"
+            )
+            return False
+    
+    def _mostrar_modal_sin_configuraciones(self):
+        """Muestra modal con opción para crear configuraciones de respuesta."""
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Configuraciones de Respuesta Requeridas")
+        msg.setText("⚠️ No hay configuraciones de respuesta automática")
+        
+        mensaje_detallado = """
+<b>RAZÓN:</b> Sin configuraciones no se pueden responder glosas automáticamente.
+
+<b>¿QUÉ HACER?</b>
+1. Haga clic en "Gestionar Configuraciones" para crear sus configuraciones personalizadas
+2. O haga clic en "Crear Ejemplos" para comenzar con configuraciones básicas
+3. Personalice las respuestas según las necesidades de su organización
+
+<b>NOTA:</b> Cada cliente debe crear sus propias configuraciones personalizadas.
+        """
+        
+        msg.setDetailedText(mensaje_detallado)
+        
+        # Botones personalizados
+        gestionar_btn = msg.addButton("🔧 Gestionar Configuraciones", QMessageBox.ActionRole)
+        cancelar_btn = msg.addButton("❌ Cancelar", QMessageBox.RejectRole)
+        
+        msg.exec()
+        
+        if msg.clickedButton() == gestionar_btn:
+            self._abrir_gestor_configuraciones()
+    
+    def _mostrar_modal_configuraciones_inactivas(self, configuraciones: List[Dict]):
+        """Muestra modal cuando hay configuraciones pero están inactivas."""
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Configuraciones Inactivas")
+        msg.setText("⚠️ Hay configuraciones pero están inactivas")
+        
+        activas = [c for c in configuraciones if c['activo']]
+        inactivas = [c for c in configuraciones if not c['activo']]
+        
+        mensaje_detallado = f"""
+<b>RESUMEN:</b>
+• Total configuraciones: {len(configuraciones)}
+• Activas: {len(activas)}
+• Inactivas: {len(inactivas)}
+
+<b>CONFIGURACIONES INACTIVAS:</b>
+"""
+        
+        for config in inactivas:
+            mensaje_detallado += f"• {config['tipo']} - {config['justificacion_patron']}\n"
+        
+        mensaje_detallado += """
+<b>SOLUCIÓN:</b>
+• Use el gestor de configuraciones para activar las que necesite
+• O elimine las configuraciones que no necesite
+
+<b>NOTA:</b> Solo las configuraciones activas se usarán para responder glosas.
+        """
+        
+        msg.setDetailedText(mensaje_detallado)
+        
+        # Botones personalizados
+        gestionar_btn = msg.addButton("🔧 Gestionar Configuraciones", QMessageBox.ActionRole)
+        cancelar_btn = msg.addButton("❌ Cancelar", QMessageBox.RejectRole)
+        
+        msg.exec()
+        
+        if msg.clickedButton() == gestionar_btn:
+            self._abrir_gestor_configuraciones()
+    
+    def _abrir_gestor_configuraciones(self):
+        """Abre el dialog para gestionar configuraciones de respuesta."""
+        try:
+            from ui.components.configuraciones_respuesta_dialog import ConfiguracionesRespuestaDialog
+            
+            dialog = ConfiguracionesRespuestaDialog(self)
+            
+            # Conectar señal para actualizar cuando se guarden configuraciones
+            dialog.configuraciones_actualizadas.connect(self._on_configuraciones_actualizadas)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            self.logger.error(f"Error abriendo gestor de configuraciones: {e}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Error abriendo gestor de configuraciones:\n{e}"
+            )
+    
+    def _on_configuraciones_actualizadas(self):
+        """Se ejecuta cuando se actualizan las configuraciones."""
+        self.logger.info("✅ Configuraciones de respuesta actualizadas")
+        
+        # Opcional: Mostrar mensaje de éxito
+        QMessageBox.information(
+            self,
+            "Configuraciones Actualizadas",
+            "✅ Las configuraciones de respuesta han sido actualizadas.\n\n"
+            "Ahora puede ejecutar el reprocesamiento de glosas EN PAUSA."
+        )

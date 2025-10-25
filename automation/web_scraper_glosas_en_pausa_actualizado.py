@@ -238,7 +238,23 @@ class WebScraperGlosasEnPausaActualizado:
             cuentas_en_pausa = await self._obtener_cuentas_en_pausa()
             
             if not cuentas_en_pausa:
-                self._log_state("⚠️ No hay cuentas EN PAUSA para reprocesar", "warning")
+                self._log_state("="*80)
+                self._log_state("🚫 NO SE ENCONTRARON CUENTAS PROCESABLES EN EN PAUSA")
+                self._log_state("="*80)
+                self._log_state("💡 POSIBLES RAZONES:")
+                self._log_state("   • Todas las cuentas ya están COMPLETADAS")
+                self._log_state("   • Todas las cuentas tienen ≥2 intentos fallidos")
+                self._log_state("   • No hay cuentas EN PAUSA en el sistema")
+                self._log_state("")
+                self._log_state("🔧 CRITERIO ACTUAL: Solo se procesan cuentas con máximo 1 intento fallido")
+                self._log_state("📋 PARA VER DETALLES: Revisar los logs de importación arriba")
+                self._log_state("="*80)
+                
+                # Emitir signal al worker para notificar al usuario
+                if self.worker:
+                    self.worker.emit_mensaje_usuario("No se encontraron cuentas EN PAUSA procesables. "
+                                                   "Todas las cuentas ya están completadas o tienen demasiados intentos fallidos.")
+                
                 return False
             
             # Emitir signal de importación de datos
@@ -272,7 +288,28 @@ class WebScraperGlosasEnPausaActualizado:
             self._log_state(f"   • Total procesadas: {cuentas_recuperadas + cuentas_fallidas}")
             
             if cuentas_recuperadas == 0 and cuentas_fallidas == 0:
-                self._log_state("⚠️ ETAPA 3: No se procesaron cuentas", "warning")
+                # ✅ DETECTAR: Si fue por falta de configuraciones
+                if not hasattr(self.procesador_en_pausa, 'configuraciones_respuesta') or not self.procesador_en_pausa.configuraciones_respuesta:
+                    self._log_state("="*80)
+                    self._log_state("🚫 PROCESAMIENTO CANCELADO: FALTA CONFIGURACIÓN DE RESPUESTAS AUTOMÁTICAS")
+                    self._log_state("="*80)
+                    self._log_state("💡 PROBLEMA: No se encontró la tabla 'glosas_respuestas_config' o está vacía")
+                    self._log_state("🔧 SOLUCIÓN:")
+                    self._log_state("   1. Ejecute la aplicación para crear la tabla automáticamente")
+                    self._log_state("   2. Configure respuestas automáticas en la base de datos")
+                    self._log_state("   3. Vuelva a ejecutar el reprocesamiento")
+                    self._log_state("="*80)
+                    
+                    # Emitir mensaje específico al usuario
+                    if self.worker:
+                        self.worker.emit_mensaje_usuario(
+                            "PROCESAMIENTO CANCELADO: No hay configuraciones de respuesta automática.\n\n"
+                            "El sistema requiere configuraciones para responder glosas automáticamente.\n"
+                            "Debe agregar configuraciones personalizadas en la tabla 'glosas_respuestas_config'.\n\n"
+                            "Por favor, configure las respuestas automáticas según sus necesidades específicas y vuelva a intentar."
+                        )
+                else:
+                    self._log_state("⚠️ ETAPA 3: No se procesaron cuentas por otras razones", "warning")
                 return False
             
             self._log_state("✅ ETAPA 3 COMPLETADA: Procesamiento heredado terminado")
@@ -301,7 +338,7 @@ class WebScraperGlosasEnPausaActualizado:
                                fecha_radicacion, COALESCE(intentos, 0) as intentos
                         FROM cuenta_glosas_principal 
                         WHERE estado IN ('FALLIDO', 'EN_PROCESO') 
-                        AND COALESCE(intentos, 0) < 5
+                        AND COALESCE(intentos, 0) < 2
                         ORDER BY intentos ASC, created_at ASC
                     """)
                     
@@ -359,6 +396,9 @@ class WebScraperGlosasEnPausaActualizado:
                 return []
             
             cuentas_nuevas = []
+            cuentas_ya_existen = 0
+            cuentas_completadas = 0
+            cuentas_muchos_intentos = 0
             
             for cuenta_data in todas_las_cuentas:
                 idcuenta = cuenta_data['idcuenta']
@@ -367,12 +407,16 @@ class WebScraperGlosasEnPausaActualizado:
                 estado_actual = self.db_manager.get_cuenta_estado(idcuenta)
                 
                 if estado_actual is None:
-                    # ✅ CORRECCIÓN: Usar método específico EN PAUSA
+                    # ✅ CORRECCIÓN: Usar método específico EN PAUSA con TODOS los campos
                     self.db_manager.crear_cuenta_glosa_pausa(
                         idcuenta=cuenta_data['idcuenta'],
                         proveedor=cuenta_data.get('proveedor', ''),
                         valor_glosado=cuenta_data.get('valor_glosado', ''),
-                        fecha_radicacion=cuenta_data.get('fecha_radicacion', '')
+                        fecha_radicacion=cuenta_data.get('fecha_radicacion', ''),
+                        numero_radicacion=cuenta_data.get('numero_radicacion', ''),
+                        numero_factura=cuenta_data.get('numero_factura', ''),
+                        fecha_factura=cuenta_data.get('fecha_factura', ''),
+                        valor_factura=cuenta_data.get('valor_factura', 0.0)
                     )
                     
                     cuenta_data['intentos'] = 0
@@ -381,8 +425,13 @@ class WebScraperGlosasEnPausaActualizado:
                     
                     self._log_state(f"✅ Cuenta {idcuenta} importada para EN PAUSA con método específico")
                 else:
+                    cuentas_ya_existen += 1
+                    
                     # Si ya existe, verificar si es procesable
-                    if estado_actual in [EstadoCuenta.FALLIDO, EstadoCuenta.EN_PROCESO]:
+                    if estado_actual == EstadoCuenta.COMPLETADO:
+                        cuentas_completadas += 1
+                        self._log_state(f"⚪ Cuenta {idcuenta} ya está COMPLETADA - no se reprocesa")
+                    elif estado_actual in [EstadoCuenta.FALLIDO, EstadoCuenta.EN_PROCESO]:
                         # Obtener datos completos desde BD
                         with self.db_manager.get_connection() as conn:
                             cursor = conn.execute("""
@@ -393,7 +442,7 @@ class WebScraperGlosasEnPausaActualizado:
                             """, (idcuenta,))
                             
                             row = cursor.fetchone()
-                            if row and row['intentos'] < 5:
+                            if row and row['intentos'] < 2:
                                 cuenta_data_bd = {
                                     'idcuenta': row['idcuenta'],
                                     'proveedor': row['proveedor'],
@@ -405,6 +454,28 @@ class WebScraperGlosasEnPausaActualizado:
                                 cuentas_nuevas.append(cuenta_data_bd)
                                 
                                 self._log_state(f"✅ Cuenta {idcuenta} ya existe y es procesable (intentos: {row['intentos']})")
+                            else:
+                                cuentas_muchos_intentos += 1
+                                self._log_state(f"⚠️ Cuenta {idcuenta} tiene demasiados intentos ({row['intentos']}) - no es procesable")
+            
+            # ✅ MEJORAR: Resumen detallado del procesamiento
+            self._log_state("="*60)
+            self._log_state("📊 RESUMEN DE IMPORTACIÓN DESDE TABLA WEB:")
+            self._log_state(f"🔍 Total cuentas encontradas en tabla: {len(todas_las_cuentas)}")
+            self._log_state(f"✅ Cuentas nuevas importadas: {len(cuentas_nuevas) - cuentas_ya_existen}")
+            self._log_state(f"🔄 Cuentas existentes procesables: {len(cuentas_nuevas) - (len(cuentas_nuevas) - cuentas_ya_existen)}")
+            self._log_state(f"⚪ Cuentas ya completadas: {cuentas_completadas}")
+            self._log_state(f"⚠️ Cuentas con muchos intentos (≥2): {cuentas_muchos_intentos}")
+            self._log_state(f"📋 Total procesables finales: {len(cuentas_nuevas)}")
+            
+            if len(cuentas_nuevas) == 0:
+                if cuentas_ya_existen > 0:
+                    self._log_state("💡 RAZÓN: Todas las cuentas ya existen en BD y no son procesables")
+                    self._log_state("   • Para ser procesable: máximo 1 intento fallido")
+                    self._log_state("   • Cuentas COMPLETADAS no se reprocesan")
+                else:
+                    self._log_state("💡 RAZÓN: No se encontraron cuentas en la tabla web")
+            self._log_state("="*60)
             
             return cuentas_nuevas
             
